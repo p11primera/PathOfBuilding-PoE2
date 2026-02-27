@@ -357,4 +357,35 @@ describe("TestTreeOptimizer", function()
 			assert.is_true(used <= 5 + 1) -- +1 for class start
 		end)
 	end)
+
+	describe("pinned nodes", function()
+		it("findNodeByName returns empty for empty query", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local results = optimizer.findNodesByName(build.spec, "")
+			assert.is_true(type(results) == "table")
+			assert.are.equals(0, #results)
+		end)
+
+		it("ensurePinnedAllocated allocates pinned nodes and paths", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local spec = build.spec
+			spec:BuildAllDependsAndPaths()
+
+			-- Find a reachable Normal node within 3 hops
+			local targetNode = nil
+			for id, node in pairs(spec.nodes) do
+				if not node.alloc and node.path and #node.path > 0
+					and node.type == "Normal" and node.pathDist and node.pathDist <= 3 then
+					targetNode = node
+					break
+				end
+			end
+
+			if targetNode then
+				local pinned = { [targetNode.id] = true }
+				optimizer.ensurePinnedAllocated(spec, pinned)
+				assert.is_true(targetNode.alloc)
+			end
+		end)
+	end)
 end)
