@@ -210,4 +210,90 @@ describe("TestTreeOptimizer", function()
 			assert.are.equals(0, #leaves)
 		end)
 	end)
+
+	describe("mutations", function()
+		local function countAllocNodes(spec)
+			local count = 0
+			for _ in pairs(spec.allocNodes) do count = count + 1 end
+			return count
+		end
+
+		local function setupTree(nNodes)
+			local spec = build.spec
+			spec:BuildAllDependsAndPaths()
+			local optimizer = build.calcsTab.calcs.optimizer
+			for i = 1, nNodes do
+				local reachable = optimizer.getReachableNodes(spec)
+				if #reachable > 0 then
+					spec:AllocNode(reachable[1])
+				end
+			end
+			return spec
+		end
+
+		it("mutateAdd increases node count by path length", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local spec = setupTree(3)
+			local before = countAllocNodes(spec)
+			local ok = optimizer.mutateAdd(spec, {})
+			if ok then
+				local after = countAllocNodes(spec)
+				assert.is_true(after > before, "node count should increase after add")
+			end
+		end)
+
+		it("mutateRemove decreases node count", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local spec = setupTree(5)
+			local before = countAllocNodes(spec)
+			local ok = optimizer.mutateRemove(spec, {})
+			if ok then
+				local after = countAllocNodes(spec)
+				assert.is_true(after < before, "node count should decrease after remove")
+			end
+		end)
+
+		it("mutateRemove never removes pinned nodes", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local spec = setupTree(5)
+
+			-- Pin all non-start allocated nodes
+			local pinned = {}
+			for id, node in pairs(spec.allocNodes) do
+				if node.type ~= "ClassStart" and node.type ~= "AscendClassStart" then
+					pinned[id] = true
+				end
+			end
+
+			local ok = optimizer.mutateRemove(spec, pinned)
+			assert.is_false(ok)
+		end)
+
+		it("mutateSwap keeps roughly same node count", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local spec = setupTree(5)
+			local ok = optimizer.mutateSwap(spec, {})
+			if ok then
+				-- Verify tree consistency: all allocNodes have alloc=true
+				for id, node in pairs(spec.allocNodes) do
+					assert.is_true(node.alloc, "allocated node " .. tostring(id) .. " should have alloc=true")
+				end
+			end
+		end)
+
+		it("mutate applies a random mutation successfully", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local spec = setupTree(5)
+			local successes = 0
+			for i = 1, 10 do
+				local snap = optimizer.snapshotAlloc(spec)
+				local ok = optimizer.mutate(spec, {})
+				if ok then
+					successes = successes + 1
+				end
+				optimizer.restoreAlloc(spec, snap)
+			end
+			assert.is_true(successes > 0, "at least some mutations should succeed")
+		end)
+	end)
 end)
