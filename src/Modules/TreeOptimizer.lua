@@ -280,4 +280,36 @@ function optimizer.runSA(build, params)
 	}
 end
 
+-- Search for nodes by name (case-insensitive substring match).
+-- Returns array of {id, name, type} for notables, keystones, and normals.
+function optimizer.findNodesByName(spec, query)
+	if not query or query == "" then return {} end
+	local results = {}
+	local lowerQuery = query:lower()
+	for id, node in pairs(spec.nodes) do
+		if node.dn and node.dn:lower():find(lowerQuery, 1, true) then
+			if node.type == "Notable" or node.type == "Keystone" or node.type == "Normal" then
+				t_insert(results, {
+					id = id,
+					name = node.dn,
+					type = node.type,
+				})
+			end
+		end
+	end
+	return results
+end
+
+-- Ensure all pinned nodes are allocated (and paths to them).
+-- pinnedNodes: { [nodeId] = true }
+function optimizer.ensurePinnedAllocated(spec, pinnedNodes)
+	spec:BuildAllDependsAndPaths()
+	for id in pairs(pinnedNodes) do
+		local node = spec.nodes[id]
+		if node and not node.alloc and node.path then
+			spec:AllocNode(node)
+		end
+	end
+end
+
 return optimizer
