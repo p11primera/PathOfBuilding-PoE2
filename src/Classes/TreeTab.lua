@@ -277,6 +277,21 @@ local TreeTabClass = newClass("TreeTab", "ControlHost", function(self, build)
 		end
 	end)
 	self.controls.powerReportList.shown = false
+
+	-- Optimizer Button
+	self.controls.optimizerToggle = new("ButtonControl", { "LEFT", self.controls.powerReport, "RIGHT" }, { 8, 0, 150, 20 },
+		function() return self.controls.optimizerPanel.shown and "Hide Optimizer" or "Show Optimizer" end,
+		function()
+			self.controls.optimizerPanel.shown = not self.controls.optimizerPanel.shown
+		end)
+
+	-- Optimizer Panel
+	self.controls.optimizerPanel = new("OptimizerPanel",
+		{ "TOPLEFT", self.controls.specSelect, "BOTTOMLEFT" },
+		{ 0, 4, 700, 120 },
+		build)
+	self.controls.optimizerPanel.shown = false
+
 	-- Progress callback from the CalcsTab power builder coroutine
 	self.powerBuilderToastActive = false
 	self.lastProgressToastUpdate = 0
@@ -343,6 +358,11 @@ local TreeTabClass = newClass("TreeTab", "ControlHost", function(self, build)
 end)
 
 function TreeTabClass:Draw(viewPort, inputEvents)
+	-- Resume optimizer coroutine each frame
+	if self.controls.optimizerPanel and self.controls.optimizerPanel.running then
+		self.controls.optimizerPanel:OnFrame()
+	end
+
 	self.anchorControls.x = viewPort.x + 4
 	self.anchorControls.y = viewPort.y + viewPort.height - 24
 
@@ -427,7 +447,7 @@ function TreeTabClass:Draw(viewPort, inputEvents)
 		self.controls.specConvertText:SetAnchor("BOTTOMLEFT", self.controls.specSelect, "TOPLEFT", 0, -38)
 	end
 
-	local bottomDrawerHeight = self.controls.powerReportList.shown and 194 or 0
+	local bottomDrawerHeight = (self.controls.powerReportList.shown and 194 or 0) + (self.controls.optimizerPanel.shown and 128 or 0)
 	self.controls.specSelect.y = -bottomDrawerHeight - linesHeight
 
 	local treeViewPort = { x = viewPort.x, y = viewPort.y, width = viewPort.width, height = viewPort.height - (self.showConvert and 64 + bottomDrawerHeight + linesHeight or 32 + bottomDrawerHeight + linesHeight)}
