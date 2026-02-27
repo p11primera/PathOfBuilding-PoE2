@@ -48,4 +48,38 @@ function optimizer.calcScore(output, baseOutput, alpha, customWeights)
 	return alpha * offenceRatio + (1 - alpha) * defenceRatio
 end
 
+-- Get all unallocated nodes exactly 1 hop from the current tree.
+-- These are candidates for the Add mutation.
+function optimizer.getReachableNodes(spec)
+	local reachable = { }
+	for id, node in pairs(spec.nodes) do
+		if not node.alloc
+			and node.type ~= "ClassStart"
+			and node.type ~= "AscendClassStart"
+			and node.type ~= "Mastery"
+			and node.pathDist == 1 then
+			t_insert(reachable, node)
+		end
+	end
+	return reachable
+end
+
+-- Get all allocated leaf nodes (nodes whose removal won't disconnect the tree).
+-- A node is a leaf if no other allocated node depends solely on it.
+-- Pinned nodes and class starts are excluded.
+function optimizer.getLeafNodes(spec, pinnedNodes)
+	local leaves = { }
+	for id, node in pairs(spec.allocNodes) do
+		if node.type ~= "ClassStart"
+			and node.type ~= "AscendClassStart"
+			and not pinnedNodes[id]
+			and node.depends
+			and #node.depends == 1      -- only depends on itself
+		then
+			t_insert(leaves, node)
+		end
+	end
+	return leaves
+end
+
 return optimizer
