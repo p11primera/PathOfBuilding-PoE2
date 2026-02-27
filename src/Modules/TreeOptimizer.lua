@@ -154,4 +154,130 @@ function optimizer.mutate(spec, pinnedNodes)
 	end
 end
 
+-- SA acceptance probability.
+-- Always accepts improvements. For worse moves, probability decreases with temperature.
+function optimizer.acceptanceProbability(currentScore, newScore, temperature)
+	if newScore >= currentScore then
+		return 1.0
+	end
+	return m_exp((newScore - currentScore) / m_max(temperature, 0.0001))
+end
+
+-- Count non-start allocated nodes (the "used points").
+local function countUsedPoints(spec)
+	local count = 0
+	for id, node in pairs(spec.allocNodes) do
+		if node.type ~= "ClassStart" and node.type ~= "AscendClassStart" then
+			count = count + 1
+		end
+	end
+	return count
+end
+
+-- Trim excess nodes to fit within point budget.
+-- Removes random leaf nodes until within budget.
+local function trimToBudget(spec, pinnedNodes, budget)
+	while countUsedPoints(spec) > budget do
+		local leaves = optimizer.getLeafNodes(spec, pinnedNodes)
+		if #leaves == 0 then break end
+		local leaf = leaves[m_random(#leaves)]
+		spec:DeallocNode(leaf)
+	end
+end
+
+-- Evaluate a tree allocation using the calc engine.
+-- The calcFunc from getMiscCalculator can accept an override with addNodes.
+-- We build a set of all allocated non-start nodes to pass.
+local function evaluateAlloc(calcFunc, spec)
+	local addNodes = { }
+	for id, node in pairs(spec.allocNodes) do
+		addNodes[node] = true
+	end
+	return calcFunc({ addNodes = addNodes }, false)
+end
+
+-- Run Simulated Annealing optimization (synchronous, blocking).
+-- params: { alpha, maxIterations, pointBudget, pinnedNodes, customWeights }
+-- Returns: { bestAlloc, bestScore, iterations }
+function optimizer.runSA(build, params)
+	local alpha = params.alpha or 0.5
+	local maxIter = params.maxIterations or 10000
+	local budget = params.pointBudget or 50
+	local pinned = params.pinnedNodes or {}
+	local weights = params.customWeights
+
+	local spec = build.spec
+
+	-- Get calculator
+	local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
+	local baseScore = optimizer.calcScore(calcBase, calcBase, alpha, weights)
+
+	-- Initialize from current tree
+	local currentAlloc = optimizer.snapshotAlloc(spec)
+	local currentScore = optimizer.calcScore(calcBase, calcBase, alpha, weights)
+	local bestAlloc = optimizer.snapshotAlloc(spec)
+	local bestScore = currentScore
+
+	-- SA parameters
+	local T0 = 1.0
+	local coolingRate = 0.9997
+	local temp = T0
+	local stagnantCount = 0
+	local maxStagnant = 500
+	local earlyStopStagnant = 2000
+
+	for iter = 1, maxIter do
+		local prevAlloc = optimizer.snapshotAlloc(spec)
+
+		local mutated = optimizer.mutate(spec, pinned)
+		if mutated then
+			trimToBudget(spec, pinned, budget)
+
+			local output = evaluateAlloc(calcFunc, spec)
+			local newScore = optimizer.calcScore(output, calcBase, alpha, weights)
+
+			local prob = optimizer.acceptanceProbability(currentScore, newScore, temp)
+			if m_random() < prob then
+				currentAlloc = optimizer.snapshotAlloc(spec)
+				currentScore = newScore
+				if newScore > bestScore then
+					bestAlloc = optimizer.snapshotAlloc(spec)
+					bestScore = newScore
+					stagnantCount = 0
+				else
+					stagnantCount = stagnantCount + 1
+				end
+			else
+				optimizer.restoreAlloc(spec, prevAlloc)
+				stagnantCount = stagnantCount + 1
+			end
+		else
+			stagnantCount = stagnantCount + 1
+		end
+
+		temp = temp * coolingRate
+
+		if stagnantCount >= maxStagnant and stagnantCount < earlyStopStagnant then
+			temp = T0 * 0.5
+			stagnantCount = 0
+		end
+
+		if stagnantCount >= earlyStopStagnant then
+			optimizer.restoreAlloc(spec, bestAlloc)
+			return {
+				bestAlloc = bestAlloc,
+				bestScore = bestScore,
+				iterations = iter,
+			}
+		end
+	end
+
+	optimizer.restoreAlloc(spec, bestAlloc)
+	return {
+		bestAlloc = bestAlloc,
+		bestScore = bestScore,
+		iterations = maxIter,
+	}
+end
+
 return optimizer
