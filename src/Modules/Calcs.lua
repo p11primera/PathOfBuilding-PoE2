@@ -20,6 +20,7 @@ require("Modules.CalcDefence")
 require("Modules.CalcOffence")
 require("Modules.CalcTriggers")
 require("Modules.CalcMirages")
+calcs.optimizer = require("Modules.TreeOptimizer")
 
 -- Get the average value of a table -- note this is unused
 function math.average(t)
