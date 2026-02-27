@@ -312,4 +312,105 @@ function optimizer.ensurePinnedAllocated(spec, pinnedNodes)
 	end
 end
 
+-- Create a coroutine that runs SA and yields periodically for UI responsiveness.
+-- Returns a coroutine. Resume it each frame. When dead, the return value is the final result.
+-- While running, yields { progress, iteration, bestScore } tables for progress updates.
+function optimizer.createOptimizerCoroutine(build, params)
+	return coroutine.create(function()
+		local alpha = params.alpha or 0.5
+		local maxIter = params.maxIterations or 10000
+		local budget = params.pointBudget or 50
+		local pinned = params.pinnedNodes or {}
+		local weights = params.customWeights
+
+		local spec = build.spec
+
+		-- Ensure pinned nodes are allocated first
+		optimizer.ensurePinnedAllocated(spec, pinned)
+
+		-- Get calculator
+		local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
+
+		-- Initialize
+		local currentAlloc = optimizer.snapshotAlloc(spec)
+		local currentScore = optimizer.calcScore(calcBase, calcBase, alpha, weights)
+		local bestAlloc = optimizer.snapshotAlloc(spec)
+		local bestScore = currentScore
+
+		-- SA state
+		local T0 = 1.0
+		local coolingRate = 0.9997
+		local temp = T0
+		local stagnantCount = 0
+		local maxStagnant = 500
+		local earlyStopStagnant = 2000
+
+		local start = GetTime and GetTime() or os.clock() * 1000
+
+		for iter = 1, maxIter do
+			local prevAlloc = optimizer.snapshotAlloc(spec)
+
+			local mutated = optimizer.mutate(spec, pinned)
+			if mutated then
+				trimToBudget(spec, pinned, budget)
+
+				local output = evaluateAlloc(calcFunc, spec)
+				local newScore = optimizer.calcScore(output, calcBase, alpha, weights)
+
+				local prob = optimizer.acceptanceProbability(currentScore, newScore, temp)
+				if m_random() < prob then
+					currentAlloc = optimizer.snapshotAlloc(spec)
+					currentScore = newScore
+					if newScore > bestScore then
+						bestAlloc = optimizer.snapshotAlloc(spec)
+						bestScore = newScore
+						stagnantCount = 0
+					else
+						stagnantCount = stagnantCount + 1
+					end
+				else
+					optimizer.restoreAlloc(spec, prevAlloc)
+					stagnantCount = stagnantCount + 1
+				end
+			else
+				stagnantCount = stagnantCount + 1
+			end
+
+			temp = temp * coolingRate
+
+			if stagnantCount >= maxStagnant and stagnantCount < earlyStopStagnant then
+				temp = T0 * 0.5
+				stagnantCount = 0
+			end
+
+			if stagnantCount >= earlyStopStagnant then
+				optimizer.restoreAlloc(spec, bestAlloc)
+				return {
+					bestAlloc = bestAlloc,
+					bestScore = bestScore,
+					iterations = iter,
+				}
+			end
+
+			-- Yield every ~100ms for UI responsiveness
+			local now = GetTime and GetTime() or os.clock() * 1000
+			if now - start > 100 then
+				coroutine.yield({
+					progress = iter / maxIter,
+					iteration = iter,
+					bestScore = bestScore,
+				})
+				start = now
+			end
+		end
+
+		optimizer.restoreAlloc(spec, bestAlloc)
+		return {
+			bestAlloc = bestAlloc,
+			bestScore = bestScore,
+			iterations = maxIter,
+		}
+	end)
+end
+
 return optimizer

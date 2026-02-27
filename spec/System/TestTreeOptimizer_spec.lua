@@ -388,4 +388,34 @@ describe("TestTreeOptimizer", function()
 			end
 		end)
 	end)
+
+	describe("coroutine runner", function()
+		it("createOptimizerCoroutine returns a resumable coroutine", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local spec = build.spec
+			spec:BuildAllDependsAndPaths()
+
+			local co = optimizer.createOptimizerCoroutine(build, {
+				alpha = 0.5,
+				maxIterations = 20,
+				pointBudget = 10,
+				pinnedNodes = {},
+			})
+
+			assert.are.equals("thread", type(co))
+
+			-- Resume until dead
+			local result
+			while coroutine.status(co) ~= "dead" do
+				local ok, val = coroutine.resume(co)
+				assert.is_true(ok)
+				if coroutine.status(co) == "dead" then
+					result = val
+				end
+			end
+
+			assert.is_not_nil(result)
+			assert.is_not_nil(result.bestScore)
+		end)
+	end)
 end)
