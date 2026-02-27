@@ -118,6 +118,7 @@
 	<File name="Classes/ModStore.lua" part="program" sha1="a8b5f802065c693f4dcdcd2fe65217c4173a5805" />
 	<File name="Classes/NotableDBControl.lua" part="program" sha1="00a9b3adc857487a62707aa821319ccf5b876e2e" />
 	<File name="Classes/NotesTab.lua" part="program" sha1="de067274e65a7d71940caead279c3a1f8d6fce3e" />
+	<File name="Classes/OptimizerPanel.lua" part="program" />
 	<File name="Classes/PartyTab.lua" part="program" sha1="4ee6e648ecfa675f96bef7f74eef394b096a3821" />
 	<File name="Classes/PassiveMasteryControl.lua" part="program" sha1="d26082d3fa6485b0813c3a988d180208fdd652ef" />
 	<File name="Classes/PassiveSpec.lua" part="program" sha1="83e9542cae3d6876beaede797b93e4c918431bb1" />
