@@ -45,11 +45,13 @@ def _alphanumeric(key: str) -> list[int | str]:
     ]
 
 
-def create_manifest(version: str | None = None, replace: bool = False) -> None:
+def create_manifest(version: str | None = None, replace: bool = False, platform: str = "windows") -> None:
     """Generate new SHA1 hashes and version number for Path of Building's manifest file.
 
     :param version: Three-part version number following https://semver.org/.
     :param replace: Whether to overwrite the existing manifest file.
+    :param platform: Target platform ("windows" or "mac"). Sections for the
+        opposing platform are omitted from the generated manifest.
     :return:
     """
     base_path = pathlib.Path().absolute()
@@ -73,20 +75,34 @@ def create_manifest(version: str | None = None, replace: bool = False) -> None:
         logging.critical(f"Manifest configuration file not found in path '{base_path}'")
         return
 
+    # Determine which runtime section to include/exclude based on platform.
+    # "runtime"     = Windows-only DLLs and EXEs
+    # "runtime-mac" = macOS-only dylibs
+    skip_sections: set[str] = set()
+    if platform == "mac":
+        skip_sections.add("runtime")
+    else:
+        skip_sections.add("runtime-mac")
+
     base_url = "https://raw.githubusercontent.com/PathOfBuildingCommunity/PathOfBuilding-PoE2/{branch}/"
     parts: list[dict[str, str]] = []
     for part in config.sections():
+        if part in skip_sections:
+            continue
         url = base_url + config[part]["path"]
         url_with_trailing_slash = url if url.endswith("/") else url + "/"
-        attributes = (
-            {"part": part, "platform": "win32", "url": url_with_trailing_slash}
-            if part == "runtime"
-            else {"part": part, "url": url_with_trailing_slash}
-        )
+        if part == "runtime":
+            attributes = {"part": part, "platform": "win32", "url": url_with_trailing_slash}
+        elif part == "runtime-mac":
+            attributes = {"part": part, "platform": "mac", "url": url_with_trailing_slash}
+        else:
+            attributes = {"part": part, "url": url_with_trailing_slash}
         parts.append(attributes)
 
     files: list[dict[str, str]] = []
     for section in config.sections():
+        if section in skip_sections:
+            continue
         include_files = _parse_list_option(config, section, "include-files")
         include_dirs = _parse_list_option(config, section, "include-directories")
         exclude_files = _parse_list_option(config, section, "exclude-files")
@@ -151,12 +167,19 @@ def cli() -> None:
         help="Set manifest version number",
         metavar="SEMVER",
     )
+    parser.add_argument(
+        "--platform",
+        action="store",
+        choices=["windows", "mac"],
+        default="windows",
+        help="Target platform for the generated manifest (default: windows)",
+    )
     args = parser.parse_args()
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
     elif args.quiet:
         logging.basicConfig(level=logging.CRITICAL + 1)
-    create_manifest(args.set_version or None, args.in_place)
+    create_manifest(args.set_version or None, args.in_place, args.platform)
 
 
 if __name__ == "__main__":
