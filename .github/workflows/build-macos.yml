@@ -1,0 +1,87 @@
+name: Build macOS (arm64)
+
+on:
+  push:
+    branches:
+      - feature/mac-os-port
+      - dev
+      - master
+  pull_request:
+    branches:
+      - dev
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      sg_ref:
+        description: 'SimpleGraphic branch/tag to build'
+        required: false
+        default: 'feature/macos-port'
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build-macos:
+    runs-on: macos-latest  # arm64 on GitHub-hosted runners
+
+    steps:
+      - name: Checkout PoB2 repo
+        uses: actions/checkout@v4
+
+      - name: Checkout SimpleGraphic
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic
+          ref: ${{ github.event.inputs.sg_ref || 'feature/macos-port' }}
+          path: SimpleGraphic
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja
+          # vcpkg bootstrap is handled by the CMake toolchain file
+
+      - name: Configure SimpleGraphic
+        working-directory: SimpleGraphic
+        run: |
+          SDK=$(xcrun --show-sdk-path)
+          cmake -B build -G Ninja \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_SYSROOT="$SDK" \
+            -DVCPKG_TARGET_TRIPLET=arm64-osx \
+            -DVCPKG_OVERLAY_TRIPLETS=./vcpkg-triplets \
+            -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build SimpleGraphic
+        working-directory: SimpleGraphic
+        run: cmake --build build -j$(sysctl -n hw.logicalcpu)
+
+      - name: Install SimpleGraphic artifacts
+        working-directory: SimpleGraphic
+        run: cmake --install build --prefix ../sg-install
+
+      - name: Package .app bundle
+        run: ./package-macos.sh ./sg-install ./dist
+
+      - name: Zip app bundle
+        run: |
+          ditto -c -k --keepParent \
+            "dist/Path of Building-PoE2.app" \
+            "dist/Path-of-Building-PoE2-macos.zip"
+
+      - name: Upload artifact (CI builds)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pob2-macos-arm64
+          path: dist/Path-of-Building-PoE2-macos.zip
+          retention-days: 14
+
+      - name: Upload to release
+        if: github.event_name == 'release'
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "dist/Path-of-Building-PoE2-macos.zip" --clobber \
+            -R "${{ github.repository }}"
