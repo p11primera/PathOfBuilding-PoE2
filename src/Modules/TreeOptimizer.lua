@@ -82,4 +82,76 @@ function optimizer.getLeafNodes(spec, pinnedNodes)
 	return leaves
 end
 
+-- Snapshot current allocation as a set of node IDs.
+function optimizer.snapshotAlloc(spec)
+	local snapshot = { }
+	for id in pairs(spec.allocNodes) do
+		snapshot[id] = true
+	end
+	return snapshot
+end
+
+-- Restore allocation from a snapshot.
+function optimizer.restoreAlloc(spec, snapshot)
+	-- Clear all allocations
+	for id, node in pairs(spec.allocNodes) do
+		node.alloc = false
+	end
+	wipeTable(spec.allocNodes)
+
+	-- Restore from snapshot
+	for id in pairs(snapshot) do
+		local node = spec.nodes[id]
+		if node then
+			node.alloc = true
+			spec.allocNodes[id] = node
+		end
+	end
+	spec:BuildAllDependsAndPaths()
+end
+
+-- Mutation: Add a random reachable node.
+-- Returns true if successful.
+function optimizer.mutateAdd(spec, pinnedNodes)
+	local reachable = optimizer.getReachableNodes(spec)
+	if #reachable == 0 then return false end
+	local node = reachable[m_random(#reachable)]
+	spec:AllocNode(node)
+	return true
+end
+
+-- Mutation: Remove a random leaf node.
+-- Returns true if successful.
+function optimizer.mutateRemove(spec, pinnedNodes)
+	local leaves = optimizer.getLeafNodes(spec, pinnedNodes)
+	if #leaves == 0 then return false end
+	local node = leaves[m_random(#leaves)]
+	spec:DeallocNode(node)
+	return true
+end
+
+-- Mutation: Swap — remove a leaf, then add a reachable node.
+-- Returns true if successful.
+function optimizer.mutateSwap(spec, pinnedNodes)
+	if not optimizer.mutateRemove(spec, pinnedNodes) then return false end
+	if not optimizer.mutateAdd(spec, pinnedNodes) then return false end
+	return true
+end
+
+-- Apply a random mutation based on weights.
+-- Returns true if mutation succeeded.
+function optimizer.mutate(spec, pinnedNodes)
+	local roll = m_random(100)
+	if roll <= 40 then
+		return optimizer.mutateAdd(spec, pinnedNodes)
+	elseif roll <= 70 then
+		return optimizer.mutateRemove(spec, pinnedNodes)
+	elseif roll <= 90 then
+		return optimizer.mutateSwap(spec, pinnedNodes)
+	else
+		-- Path shift: swap remove then add (simplified version)
+		return optimizer.mutateSwap(spec, pinnedNodes)
+	end
+end
+
 return optimizer
