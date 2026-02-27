@@ -305,6 +305,11 @@ function PassiveTreeViewClass:Draw(build, viewPort, inputEvents)
 
 	if treeClick == "LEFT" then
 		if hoverNode then
+			-- Check if optimizer pin mode is active
+			if self.build.treeTab.controls.optimizerPanel
+				and self.build.treeTab.controls.optimizerPanel:HandleNodeClick(hoverNode) then
+				-- Click consumed by optimizer pin mode
+			else
 			-- User left-clicked on a node
 			if hoverNode.alloc and not shouldBlockGlobalNodeDeallocation(hoverNode) then
 				-- Handle deallocation of allocated nodes
@@ -462,6 +467,7 @@ function PassiveTreeViewClass:Draw(build, viewPort, inputEvents)
 				spec:AddUndoState()
 				build.buildFlag = true
 			end
+			end -- closes pin mode if/else
 		end
 	end
 
@@ -982,6 +988,14 @@ function PassiveTreeViewClass:Draw(build, viewPort, inputEvents)
 				DrawImage(self.highlightRing, scrX - size, scrY - size, size * 2, size * 2)
 			end
 
+		end
+		-- Draw pin indicator for optimizer pinned nodes
+		if self.build.treeTab.controls.optimizerPanel
+			and self.build.treeTab.controls.optimizerPanel.pinnedNodes[nodeId] then
+			SetDrawLayer(nil, 30)
+			SetDrawColor(1, 0.8, 0, 1)
+			local size = 140 * scale / self.zoom ^ 0.2
+			DrawImage(self.highlightRing, scrX - size, scrY - size, size * 2, size * 2)
 		end
 		if node == hoverNode and (node.type ~= "Socket" or not IsKeyDown("SHIFT")) and not IsKeyDown("CTRL") and not main.popups[1] then
 			-- Draw tooltip
