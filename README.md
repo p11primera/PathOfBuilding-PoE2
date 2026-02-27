@@ -9,6 +9,24 @@
 ## Download
 Head over to the [Releases](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2/releases) page to download the install wizard or portable zip.
 
+### macOS (Apple Silicon)
+
+Download the latest `Path-of-Building-PoE2-macos.zip` from the
+[Releases](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2/releases) page.
+
+Unzip and move `Path of Building-PoE2.app` to your Applications folder.
+
+**First launch:** macOS may block the app because it is from an unidentified developer.
+Right-click the app and choose **Open**, then confirm in the dialog.
+Alternatively, run once in Terminal:
+
+```sh
+xattr -d com.apple.quarantine "/Applications/Path of Building-PoE2.app"
+```
+
+User data (builds, settings) is stored in:
+`~/Library/Application Support/Path of Building (PoE2)/`
+
 ## Features
 * Comprehensive offence + defence calculations:
   * Calculate your skill DPS, damage over time, life/mana/ES totals and much more!
