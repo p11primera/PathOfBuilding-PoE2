@@ -296,4 +296,65 @@ describe("TestTreeOptimizer", function()
 			assert.is_true(successes > 0, "at least some mutations should succeed")
 		end)
 	end)
+
+	describe("SA core", function()
+		it("acceptance probability is 1.0 for improvements", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local prob = optimizer.acceptanceProbability(1.0, 2.0, 1.0)
+			assert.are.equals(1.0, prob)
+		end)
+
+		it("acceptance probability decreases with temperature", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local probHot = optimizer.acceptanceProbability(2.0, 1.0, 1.0)
+			local probCold = optimizer.acceptanceProbability(2.0, 1.0, 0.01)
+			assert.is_true(probHot > probCold)
+		end)
+
+		it("acceptance probability is between 0 and 1 for worse moves", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local prob = optimizer.acceptanceProbability(2.0, 1.0, 0.5)
+			assert.is_true(prob > 0 and prob < 1)
+		end)
+
+		it("runSA improves score over iterations on a real build", function()
+			local spec = build.spec
+			spec:BuildAllDependsAndPaths()
+			local optimizer = build.calcsTab.calcs.optimizer
+
+			local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
+			local baseScore = optimizer.calcScore(calcBase, calcBase, 0.5, nil)
+
+			local result = optimizer.runSA(build, {
+				alpha = 0.5,
+				maxIterations = 50,
+				pointBudget = 20,
+				pinnedNodes = {},
+				customWeights = nil,
+			})
+
+			assert.is_true(result.bestScore >= baseScore)
+			assert.is_true(result.iterations > 0)
+		end)
+
+		it("enforces point budget", function()
+			local spec = build.spec
+			spec:BuildAllDependsAndPaths()
+			local optimizer = build.calcsTab.calcs.optimizer
+
+			local result = optimizer.runSA(build, {
+				alpha = 0.5,
+				maxIterations = 30,
+				pointBudget = 5,
+				pinnedNodes = {},
+				customWeights = nil,
+			})
+
+			optimizer.restoreAlloc(spec, result.bestAlloc)
+			local used = spec:CountAllocNodes()
+			-- CountAllocNodes returns: used, ascUsed, secondaryAscUsed, sockets, ws1, ws2
+			-- 'used' includes class start; budget is for non-start nodes
+			assert.is_true(used <= 5 + 1) -- +1 for class start
+		end)
+	end)
 end)
