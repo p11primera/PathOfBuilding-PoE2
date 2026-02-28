@@ -32,7 +32,7 @@ mkdir -p "$MACOS_DIR" "$FRAMEWORKS_DIR" "$RESOURCES_DIR"
 
 # ── Copy binaries from cmake install output ───────────────────────────────────
 cp "$INSTALL_DIR/MacOS/$APP_NAME" "$MACOS_DIR/"
-cp "$INSTALL_DIR/Frameworks/"*.dylib "$FRAMEWORKS_DIR/"
+cp "$INSTALL_DIR/Frameworks/"*.dylib "$INSTALL_DIR/Frameworks/"*.so "$FRAMEWORKS_DIR/"
 
 # ── Fix rpath so the binary finds its dylibs at @executable_path/../Frameworks ─
 BINARY="$MACOS_DIR/$APP_NAME"
@@ -50,6 +50,11 @@ cp -R src "$RESOURCES_DIR/"
 
 # Miscellaneous top-level assets
 cp changelog.txt LICENSE.md help.txt "$RESOURCES_DIR/"
+
+# The engine loads fonts and config from <basePath>/SimpleGraphic/ where
+# basePath = Contents/MacOS/.  Symlink into Resources to avoid duplicating
+# the ~119 font atlas files.
+ln -s ../Resources/runtime/SimpleGraphic "$MACOS_DIR/SimpleGraphic"
 
 # ── Info.plist ────────────────────────────────────────────────────────────────
 # Read version from CHANGELOG.md (first line matching "## [x.y.z]")
@@ -88,8 +93,10 @@ cat > "$CONTENTS/Info.plist" << EOF
 EOF
 
 # ── Ad-hoc code sign (no Apple Developer account needed for local builds) ─────
-# Clear any resource-fork / quarantine xattrs that would block codesign
+# Clear any extended attributes that would block codesign.
+# xattr -rc may miss the bundle root itself, so also target it explicitly.
 xattr -rc "$APP"
+xattr -d com.apple.FinderInfo "$APP" 2>/dev/null || true
 # --deep signs all nested binaries (dylibs inside Frameworks/) as well
 codesign --deep --force --sign - "$APP"
 
