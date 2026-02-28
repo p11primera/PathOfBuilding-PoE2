@@ -61,6 +61,11 @@ rm -f "$RESOURCES_DIR/src/Settings.xml"
 # Miscellaneous top-level assets
 cp changelog.txt LICENSE.md help.txt "$RESOURCES_DIR/"
 
+# App icon for Dock / Finder
+if [[ -f src/AppIcon.icns ]]; then
+    cp src/AppIcon.icns "$RESOURCES_DIR/AppIcon.icns"
+fi
+
 # The engine loads fonts and config from <basePath>/SimpleGraphic/ where
 # basePath = Contents/MacOS/.  Symlink into Resources to avoid duplicating
 # the ~119 font atlas files.
@@ -86,6 +91,8 @@ cat > "$CONTENTS/Info.plist" << EOF
   <string>${VERSION}</string>
   <key>CFBundleShortVersionString</key>
   <string>${VERSION}</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleExecutable</key>
   <string>Path of Building-PoE2</string>
   <key>CFBundlePackageType</key>
