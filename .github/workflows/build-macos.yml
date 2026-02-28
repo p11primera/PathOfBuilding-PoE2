@@ -23,7 +23,7 @@ env:
 
 jobs:
   build-macos:
-    runs-on: macos-latest  # arm64 on GitHub-hosted runners
+    runs-on: macos-14  # macos-14 = M1 arm64; macos-latest may resolve to x86_64
 
     steps:
       - name: Checkout PoB2 repo
@@ -64,6 +64,14 @@ jobs:
 
       - name: Package .app bundle
         run: ./package-macos.sh ./sg-install ./dist
+
+      - name: Smoke test — verify app starts up
+        run: |
+          BINARY="dist/Path of Building-PoE2.app/Contents/MacOS/Path of Building-PoE2"
+          OUTPUT=$("$BINARY" src/HeadlessWrapper.lua 2>&1 || true)
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "Startup time" || \
+            { echo "Smoke test FAILED: 'Startup time' not found in output"; exit 1; }
 
       - name: Zip app bundle
         run: |
