@@ -32,7 +32,14 @@ mkdir -p "$MACOS_DIR" "$FRAMEWORKS_DIR" "$RESOURCES_DIR"
 
 # ── Copy binaries from cmake install output ───────────────────────────────────
 cp "$INSTALL_DIR/MacOS/$APP_NAME" "$MACOS_DIR/"
-cp "$INSTALL_DIR/Frameworks/"*.dylib "$INSTALL_DIR/Frameworks/"*.so "$FRAMEWORKS_DIR/"
+# Use nullglob so an absent *.so (or *.dylib) doesn't pass a literal pattern
+# string to cp and cause a hard failure on a clean install with only dylibs.
+shopt -s nullglob
+DYLIBS=( "$INSTALL_DIR/Frameworks/"*.dylib )
+SOLIBS=( "$INSTALL_DIR/Frameworks/"*.so )
+shopt -u nullglob
+[[ ${#DYLIBS[@]} -gt 0 ]] && cp "${DYLIBS[@]}" "$FRAMEWORKS_DIR/"
+[[ ${#SOLIBS[@]}  -gt 0 ]] && cp "${SOLIBS[@]}"  "$FRAMEWORKS_DIR/"
 
 # ── Fix rpath so the binary finds its dylibs at @executable_path/../Frameworks ─
 BINARY="$MACOS_DIR/$APP_NAME"
@@ -47,6 +54,9 @@ cp -R runtime/SimpleGraphic "$RESOURCES_DIR/runtime/"
 
 # PoB2 Lua source tree
 cp -R src "$RESOURCES_DIR/"
+# Remove Settings.xml — it may contain the developer's auth tokens
+# (lastToken, lastRefreshToken) and must not be included in a distributable.
+rm -f "$RESOURCES_DIR/src/Settings.xml"
 
 # Miscellaneous top-level assets
 cp changelog.txt LICENSE.md help.txt "$RESOURCES_DIR/"
