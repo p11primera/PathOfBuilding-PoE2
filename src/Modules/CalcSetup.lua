@@ -1344,13 +1344,20 @@ function calcs.initEnv(build, mode, override, specEnv)
 
 	-- Find skills granted by tree nodes
 	if not accelerate.nodeAlloc then
+		-- Sort allocated nodes by ID for deterministic granted-skill order
+		-- (pairs() on a hash map iterates in platform-dependent order)
+		local sortedNodes = { }
 		for _, node in pairs(env.allocNodes) do
 			if node.grantedSkills then
-				for _, skill in ipairs(node.grantedSkills) do
-					local grantedSkill = copyTable(skill)
-					grantedSkill.sourceNode = node
-					t_insert(env.grantedSkillsNodes, grantedSkill)
-				end
+				t_insert(sortedNodes, node)
+			end
+		end
+		table.sort(sortedNodes, function(a, b) return a.id < b.id end)
+		for _, node in ipairs(sortedNodes) do
+			for _, skill in ipairs(node.grantedSkills) do
+				local grantedSkill = copyTable(skill)
+				grantedSkill.sourceNode = node
+				t_insert(env.grantedSkillsNodes, grantedSkill)
 			end
 		end
 	end
