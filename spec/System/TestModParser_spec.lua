@@ -1,8 +1,6 @@
 describe("TestModParser", function()
-	--- Parse a mod line and return the first mod from the list.
-	--- @param line string The mod text to parse.
-	--- @return table|nil mod The first parsed mod, or nil.
-	--- @return string|nil extra Unparsed remainder, or nil.
+	local band = AND64
+
 	local function parseSingle(line)
 		local modList, extra = modLib.parseMod(line)
 		if modList and #modList >= 1 then
@@ -11,19 +9,7 @@ describe("TestModParser", function()
 		return nil, extra
 	end
 
-	--- Parse a mod line and return the full mod list.
-	--- @param line string The mod text to parse.
-	--- @return table|nil modList Array of parsed mods, or nil.
-	--- @return string|nil extra Unparsed remainder, or nil.
-	local function parseAll(line)
-		return modLib.parseMod(line)
-	end
-
-	local band = AND64 or (bit and bit.band)
-
-	--- Assert that a bitfield has a given flag set.
 	local function assertFlag(flags, flag, msg)
-		assert.is_truthy(band, "band (bitwise AND) not available")
 		assert.are_not.equal(0, band(flags, flag), msg or "expected flag to be set")
 	end
 
@@ -119,7 +105,7 @@ describe("TestModParser", function()
 			assert.are.equal(20, m.value)
 		end)
 
-		it("parses +N% to all Elemental Resistances", function()
+		it("parses +N% to all elemental resistances", function()
 			local m = parseSingle("+15% to all Elemental Resistances")
 			assert.is_truthy(m)
 			assert.are.equal("ElementalResist", m.name)
@@ -251,7 +237,7 @@ describe("TestModParser", function()
 	---------------------------------------------------------------------------
 	describe("added damage modifiers", function()
 		it("parses Adds N to N Physical Damage to Attacks", function()
-			local modList = parseAll("Adds 10 to 20 Physical Damage to Attacks")
+			local modList = modLib.parseMod("Adds 10 to 20 Physical Damage to Attacks")
 			assert.is_truthy(modList)
 			assert.are.equal(2, #modList)
 
@@ -268,7 +254,7 @@ describe("TestModParser", function()
 		end)
 
 		it("parses Adds N to N Fire Damage", function()
-			local modList = parseAll("Adds 5 to 10 Fire Damage")
+			local modList = modLib.parseMod("Adds 5 to 10 Fire Damage")
 			assert.is_truthy(modList)
 			assert.are.equal(2, #modList)
 
@@ -341,7 +327,7 @@ describe("TestModParser", function()
 	---------------------------------------------------------------------------
 	describe("damage conversion", function()
 		it("parses Physical Damage taken as Fire", function()
-			local m = parseSingle("50% of Physical Damage taken as Fire")
+			local m = parseSingle("50% of Physical damage taken as Fire")
 			assert.is_truthy(m)
 			assert.are.equal("PhysicalDamageTakenAsFire", m.name)
 			assert.are.equal("BASE", m.type)
@@ -366,9 +352,9 @@ describe("TestModParser", function()
 	-- 9. Unparseable
 	---------------------------------------------------------------------------
 	describe("unparseable input", function()
-		it("returns nil modList for gibberish", function()
-			local modList, extra = parseAll("xyzzy foobar baz")
-			assert.is_falsy(modList)
+		it("returns nil for gibberish", function()
+			local modList, extra = modLib.parseMod("xyzzy foobar baz")
+			assert.is_nil(modList)
 		end)
 	end)
 end)
