@@ -41,6 +41,16 @@ shopt -u nullglob
 [[ ${#DYLIBS[@]} -gt 0 ]] && cp "${DYLIBS[@]}" "$FRAMEWORKS_DIR/"
 [[ ${#SOLIBS[@]}  -gt 0 ]] && cp "${SOLIBS[@]}"  "$FRAMEWORKS_DIR/"
 
+# ── Create ANGLE symlinks for GLFW dlopen ─────────────────────────────────────
+# GLFW calls dlopen("libEGL.dylib") at runtime, but the vcpkg angle port ships
+# "liblibEGL_angle.dylib".  Create symlinks with the names GLFW expects.
+if [[ -f "$FRAMEWORKS_DIR/liblibEGL_angle.dylib" ]]; then
+    ln -sf liblibEGL_angle.dylib   "$FRAMEWORKS_DIR/libEGL.dylib"
+fi
+if [[ -f "$FRAMEWORKS_DIR/liblibGLESv2_angle.dylib" ]]; then
+    ln -sf liblibGLESv2_angle.dylib "$FRAMEWORKS_DIR/libGLESv2.dylib"
+fi
+
 # ── Fix rpath so the binary finds its dylibs at @executable_path/../Frameworks ─
 BINARY="$MACOS_DIR/$APP_NAME"
 # Add the Frameworks rpath (may already exist from build dir — add idempotently)
