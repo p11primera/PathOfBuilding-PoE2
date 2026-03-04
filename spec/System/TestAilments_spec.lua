@@ -37,7 +37,7 @@ describe("TestAilments", function()
 			assert.is_true(igniteDPS > 0, "Fireball with 100% ignite chance should produce IgniteDPS")
 		end)
 
-		it("increased fire damage over time multiplier scales ignite", function()
+		it("increased fire damage scales ignite", function()
 			addSkill("Fireball 20/0  1")
 			applyMods("100% chance to Ignite")
 			build.configTab.input.enemyIsBoss = "None"
@@ -45,14 +45,15 @@ describe("TestAilments", function()
 			runCallback("OnFrame")
 			local baseIgnite = build.calcsTab.mainOutput.IgniteDPS or 0
 
-			applyMods("100% chance to Ignite\n50% increased Damage over Time Multiplier for Ignite")
+			applyMods("100% chance to Ignite\n50% increased Fire Damage")
 			build.configTab.input.enemyIsBoss = "None"
 			build.configTab:BuildModList()
 			runCallback("OnFrame")
 			local scaledIgnite = build.calcsTab.mainOutput.IgniteDPS or 0
 
 			if baseIgnite > 0 then
-				assert.is_true(scaledIgnite > baseIgnite, "DoT multi should increase ignite DPS")
+				assert.is_true(scaledIgnite > baseIgnite,
+					string.format("Increased fire damage should increase ignite DPS: base=%f, scaled=%f", baseIgnite, scaledIgnite))
 			end
 		end)
 
@@ -89,7 +90,7 @@ describe("TestAilments", function()
 			assert.is_true(bleedDPS > 0, "Physical attack with 100% bleed chance should produce BleedDPS")
 		end)
 
-		it("increased physical damage over time scales bleed", function()
+		it("increased physical damage scales bleed", function()
 			equipWeapon([[
 				New Item
 				Heavy Bow
@@ -100,14 +101,15 @@ describe("TestAilments", function()
 			runCallback("OnFrame")
 			local baseBleed = build.calcsTab.mainOutput.BleedDPS or 0
 
-			applyMods("100% chance to cause Bleeding on Hit\n50% increased Damage over Time Multiplier")
+			applyMods("100% chance to cause Bleeding on Hit\n50% increased Physical Damage")
 			build.configTab.input.enemyIsBoss = "None"
 			build.configTab:BuildModList()
 			runCallback("OnFrame")
 			local scaledBleed = build.calcsTab.mainOutput.BleedDPS or 0
 
 			if baseBleed > 0 then
-				assert.is_true(scaledBleed > baseBleed, "DoT multi should increase bleed DPS")
+				assert.is_true(scaledBleed > baseBleed,
+					string.format("Increased physical damage should increase bleed DPS: base=%f, scaled=%f", baseBleed, scaledBleed))
 			end
 		end)
 	end)
