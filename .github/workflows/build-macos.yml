@@ -63,6 +63,36 @@ jobs:
               print("Pattern not found — may already be fixed upstream")
           PATCH
 
+      - name: Fix lcurl duplicate symbol for LuaJIT
+        working-directory: SimpleGraphic
+        run: |
+          # LuaJIT provides luaL_setfuncs in libluajit-5.1.a even though
+          # LUA_VERSION_NUM is 501.  Lua-cURLv3's l52util.c also defines it
+          # for the Lua 5.1 compatibility path, causing a duplicate symbol
+          # linker error on macOS when building lcurl.so.
+          # Mark the definition as weak so the linker prefers LuaJIT's strong
+          # symbol and suppresses the duplicate-symbol error.
+          python3 << 'PATCH'
+          import sys
+          path = 'libs/Lua-cURLv3/src/l52util.c'
+          with open(path, 'r') as f:
+              content = f.read()
+          marker = '__attribute__((weak))'
+          if marker in content:
+              print('l52util.c: already patched — skipping')
+              sys.exit(0)
+          old = 'void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup){'
+          new = '__attribute__((weak))\nvoid luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup){'
+          if old in content:
+              content = content.replace(old, new, 1)
+              with open(path, 'w') as f:
+                  f.write(content)
+              print('Patched l52util.c: marked luaL_setfuncs as weak to avoid '
+                    'duplicate symbol with libluajit-5.1.a')
+          else:
+              print('l52util.c: expected pattern not found — may already be fixed upstream')
+          PATCH
+
       - name: Configure SimpleGraphic
         working-directory: SimpleGraphic
         run: |
