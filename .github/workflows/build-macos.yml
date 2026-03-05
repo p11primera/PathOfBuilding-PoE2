@@ -1,0 +1,127 @@
+name: Build macOS (arm64)
+
+on:
+  push:
+    branches:
+      - feature/mac-os-port
+      - dev
+      - master
+  pull_request:
+    branches:
+      - dev
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      sg_ref:
+        description: 'SimpleGraphic branch/tag to build'
+        required: false
+        default: 'feature/macos-port'
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build-macos:
+    runs-on: macos-14  # macos-14 = M1 arm64; macos-latest may resolve to x86_64
+    permissions:
+      contents: write  # needed for gh release upload; read is sufficient for non-release events
+
+    steps:
+      - name: Checkout PoB2 repo
+        uses: actions/checkout@v4
+
+      - name: Checkout SimpleGraphic
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic
+          ref: ${{ github.event.inputs.sg_ref || 'feature/macos-port' }}
+          path: SimpleGraphic
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja
+          # vcpkg bootstrap is handled by the CMake toolchain file
+
+      - name: Fix lua-utf8 include path in SimpleGraphic
+        working-directory: SimpleGraphic
+        run: |
+          # The CMake build patches lutf8lib.c into the build directory, but
+          # unidata.h stays in the source tree (libs/luautf8/).  Add the
+          # source directory to the lua-utf8 target's include paths so the
+          # compiler can find it.
+          python3 << 'PATCH'
+          content = open('CMakeLists.txt').read()
+          old = "target_include_directories(lua-utf8\n    PRIVATE\n)"
+          new = "target_include_directories(lua-utf8\n    PRIVATE\n    ${CMAKE_CURRENT_SOURCE_DIR}/libs/luautf8\n)"
+          if old in content:
+              content = content.replace(old, new)
+              open('CMakeLists.txt', 'w').write(content)
+              print("Patched lua-utf8 target_include_directories")
+          else:
+              print("Pattern not found — may already be fixed upstream")
+          PATCH
+
+      - name: Configure SimpleGraphic
+        working-directory: SimpleGraphic
+        run: |
+          SDK=$(xcrun --show-sdk-path)
+          cmake -B build -G Ninja \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_SYSROOT="$SDK" \
+            -DVCPKG_TARGET_TRIPLET=arm64-osx \
+            -DVCPKG_OVERLAY_TRIPLETS=./vcpkg-triplets \
+            -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build SimpleGraphic
+        working-directory: SimpleGraphic
+        run: cmake --build build -j$(sysctl -n hw.logicalcpu)
+
+      - name: Install SimpleGraphic artifacts
+        working-directory: SimpleGraphic
+        run: cmake --install build --prefix ../sg-install
+
+      - name: Install test dependencies
+        run: |
+          brew install luarocks luajit
+          luarocks --lua-version=5.1 install busted
+          luarocks --lua-version=5.1 install luacov-coveralls
+
+      - name: Run tests
+        run: |
+          eval $(luarocks --lua-version=5.1 path)
+          busted --lua=luajit
+
+      - name: Package .app bundle
+        run: ./package-macos.sh ./sg-install ./dist
+
+      - name: Smoke test — verify app starts up
+        run: |
+          BINARY="dist/Path of Building-PoE2.app/Contents/MacOS/Path of Building-PoE2"
+          OUTPUT=$("$BINARY" src/HeadlessWrapper.lua 2>&1 || true)
+          echo "$OUTPUT"
+          echo "$OUTPUT" | grep -q "Startup time" || \
+            { echo "Smoke test FAILED: 'Startup time' not found in output"; exit 1; }
+
+      - name: Zip app bundle
+        run: |
+          ditto -c -k --keepParent \
+            "dist/Path of Building-PoE2.app" \
+            "dist/Path-of-Building-PoE2-macos.zip"
+
+      - name: Upload artifact (CI builds)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pob2-macos-arm64
+          path: dist/Path-of-Building-PoE2-macos.zip
+          retention-days: 14
+
+      - name: Upload to release
+        if: github.event_name == 'release'
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "dist/Path-of-Building-PoE2-macos.zip" --clobber \
+            -R "${{ github.repository }}"
