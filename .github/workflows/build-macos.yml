@@ -24,6 +24,8 @@ env:
 jobs:
   build-macos:
     runs-on: macos-14  # macos-14 = M1 arm64; macos-latest may resolve to x86_64
+    permissions:
+      contents: write  # needed for gh release upload; read is sufficient for non-release events
 
     steps:
       - name: Checkout PoB2 repo
