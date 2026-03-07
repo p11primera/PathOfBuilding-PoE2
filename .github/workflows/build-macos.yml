@@ -41,21 +41,33 @@ jobs:
         id: sg_sha
         run: echo "sha=$(git -C SimpleGraphic rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Restore SimpleGraphic install cache
-        id: sg_cache
-        uses: actions/cache@v4
-        with:
-          path: sg-install
-          key: sg-macos-arm64-${{ steps.sg_sha.outputs.sha }}
+      - name: Find completed SimpleGraphic macOS build for this SHA
+        id: sg_run
+        run: |
+          RUN_ID=$(gh api \
+            "repos/${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic/actions/workflows/main.yml/runs?head_sha=${{ steps.sg_sha.outputs.sha }}&status=success&per_page=5" \
+            --jq '[.workflow_runs[] | select(.conclusion=="success")] | first | .id // ""')
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Install dependencies
-        if: steps.sg_cache.outputs.cache-hit != 'true'
+      - name: Download SimpleGraphic macOS install artifacts
+        id: sg_download
+        if: steps.sg_run.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: SimpleGraphic-arm64-osx
+          path: sg-install
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic
+          run-id: ${{ steps.sg_run.outputs.run_id }}
+        continue-on-error: true
+
+      - name: Install dependencies (fallback build only)
+        if: steps.sg_download.outcome != 'success'
         run: |
           brew install cmake ninja
-          # vcpkg bootstrap is handled by the CMake toolchain file
 
-      - name: Configure SimpleGraphic
-        if: steps.sg_cache.outputs.cache-hit != 'true'
+      - name: Configure SimpleGraphic (fallback build only)
+        if: steps.sg_download.outcome != 'success'
         working-directory: SimpleGraphic
         run: |
           SDK=$(xcrun --show-sdk-path)
@@ -67,13 +79,13 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake \
             -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build SimpleGraphic
-        if: steps.sg_cache.outputs.cache-hit != 'true'
+      - name: Build SimpleGraphic (fallback build only)
+        if: steps.sg_download.outcome != 'success'
         working-directory: SimpleGraphic
         run: cmake --build build -j$(sysctl -n hw.logicalcpu)
 
-      - name: Install SimpleGraphic artifacts
-        if: steps.sg_cache.outputs.cache-hit != 'true'
+      - name: Install SimpleGraphic artifacts (fallback build only)
+        if: steps.sg_download.outcome != 'success'
         working-directory: SimpleGraphic
         run: cmake --install build --prefix ../sg-install
 
