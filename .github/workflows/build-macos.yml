@@ -98,6 +98,9 @@ jobs:
       - name: Run tests
         run: |
           eval $(luarocks --lua-version=5.1 path)
+          # Prepend sg-install paths so busted can find lua-utf8.so / lcurl.so etc.
+          # On macOS, SHARED library targets install to Frameworks/; also check root.
+          export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
           busted --lua=luajit
 
       - name: Package .app bundle
