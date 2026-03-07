@@ -62,11 +62,45 @@ mkdir -p "$RESOURCES_DIR/runtime"
 cp -R runtime/lua          "$RESOURCES_DIR/runtime/"
 cp -R runtime/SimpleGraphic "$RESOURCES_DIR/runtime/"
 
-# PoB2 Lua source tree
-cp -R src "$RESOURCES_DIR/"
-# Remove Settings.xml — it may contain the developer's auth tokens
-# (lastToken, lastRefreshToken) and must not be included in a distributable.
-rm -f "$RESOURCES_DIR/src/Settings.xml"
+# ── PoB2 Lua source tree ─────────────────────────────────────────────────────
+# Mirrors the exclusions in manifest.cfg so the macOS bundle matches the
+# content policy of the Windows installer / update system.
+# rsync is used so we can pass per-pattern exclusions cleanly.
+rsync -a \
+    --exclude='Settings.xml' \
+    --exclude='poe_api_response.json' \
+    --exclude='luacov.stats.out' \
+    --exclude='Export/' \
+    --exclude='Builds/' \
+    --exclude='TreeData/' \
+    --exclude='HeadlessWrapper.lua' \
+    --exclude='LaunchInstall.lua' \
+    --exclude='Data/TimelessJewelData/*.bin' \
+    src/ "$RESOURCES_DIR/src/"
+
+# ── TreeData: selective image inclusion ──────────────────────────────────────
+# All tree versions carry their .lua and .json data files (needed so that
+# builds created on older tree versions load and calculate correctly).
+# Image assets (*.dds.zst, *.png) are only bundled for the latest version —
+# older versions' ~170 MB of textures are omitted, matching the Windows
+# approach where TreeData is fetched lazily by the update system.
+LATEST_TREE=$(grep -m1 'latestTreeVersion\s*=' src/GameVersions.lua \
+    | grep -oE '"[^"]+"' | tail -1 | tr -d '"')
+LATEST_TREE="${LATEST_TREE:-0_4}"   # fallback if parse fails
+
+for VER_DIR in src/TreeData/*/; do
+    VER=$(basename "$VER_DIR")
+    DEST="$RESOURCES_DIR/src/TreeData/$VER"
+    mkdir -p "$DEST"
+    # Data files — always included
+    find "$VER_DIR" -maxdepth 1 \( -name '*.lua' -o -name '*.json' \) \
+        -exec cp {} "$DEST/" \;
+    # Image assets — latest version only
+    if [[ "$VER" == "$LATEST_TREE" ]]; then
+        find "$VER_DIR" -maxdepth 1 ! \( -name '*.lua' -o -name '*.json' \) \
+            -not -type d -exec cp {} "$DEST/" \;
+    fi
+done
 
 # Miscellaneous top-level assets
 cp changelog.txt LICENSE.md help.txt "$RESOURCES_DIR/"
