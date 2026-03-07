@@ -41,6 +41,11 @@ shopt -u nullglob
 [[ ${#DYLIBS[@]} -gt 0 ]] && cp "${DYLIBS[@]}" "$FRAMEWORKS_DIR/"
 [[ ${#SOLIBS[@]}  -gt 0 ]] && cp "${SOLIBS[@]}"  "$FRAMEWORKS_DIR/"
 
+# GitHub Actions artifact downloads strip execute permissions; restore them.
+chmod +x "$MACOS_DIR/$APP_NAME"
+find "$FRAMEWORKS_DIR" \( -name '*.dylib' -o -name '*.so' \) \
+    -exec chmod +x {} \;
+
 # ── Create ANGLE symlinks for GLFW dlopen ─────────────────────────────────────
 # GLFW calls dlopen("libEGL.dylib") at runtime, but the vcpkg angle port ships
 # "liblibEGL_angle.dylib".  Create symlinks with the names GLFW expects.
