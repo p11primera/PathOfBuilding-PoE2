@@ -62,6 +62,17 @@ jobs:
         working-directory: SimpleGraphic
         run: cmake --install build --prefix ../sg-install
 
+      - name: Install test dependencies
+        run: |
+          brew install luarocks luajit
+          luarocks --lua-version=5.1 install busted
+          luarocks --lua-version=5.1 install luacov-coveralls
+
+      - name: Run tests
+        run: |
+          eval $(luarocks --lua-version=5.1 path)
+          busted --lua=luajit
+
       - name: Package .app bundle
         run: ./package-macos.sh ./sg-install ./dist
 
