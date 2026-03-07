@@ -76,55 +76,72 @@ jobs:
         run: cp sg-dlls/*.dll runtime/
 
       - name: Stage portable directory
+        shell: pwsh
         run: |
-          mkdir -p dist/pob2-win-portable
+          New-Item -ItemType Directory -Force -Path dist\pob2-win-portable | Out-Null
 
           # Runtime: exe + DLLs + SimpleGraphic/ fonts dir + lua/ scripts.
           # Mirrors the [runtime] exclusions in manifest.cfg.
-          rsync -a \
-            --exclude='lua-profiler.lua' \
-            --exclude='msvcr100.dll' \
-            --exclude='SimpleGraphic.cfg' \
-            --exclude='Update.exe' \
-            --exclude='imgui.ini' \
-            runtime/ dist/pob2-win-portable/
+          $runtimeExclude = @('lua-profiler.lua','msvcr100.dll','SimpleGraphic.cfg','Update.exe','imgui.ini')
+          Get-ChildItem -Path runtime -Recurse | Where-Object {
+            $_.Name -notin $runtimeExclude
+          } | ForEach-Object {
+            $rel  = $_.FullName.Substring((Resolve-Path runtime).Path.Length + 1)
+            $dest = "dist\pob2-win-portable\$rel"
+            New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+            Copy-Item $_.FullName $dest
+          }
 
           # PoB2 Lua source — mirrors the [program] exclusions in manifest.cfg.
-          rsync -a \
-            --exclude='Settings.xml' \
-            --exclude='poe_api_response.json' \
-            --exclude='luacov.stats.out' \
-            --exclude='Export/' \
-            --exclude='Builds/' \
-            --exclude='TreeData/' \
-            --exclude='HeadlessWrapper.lua' \
-            --exclude='LaunchInstall.lua' \
-            --exclude='Data/TimelessJewelData/*.bin' \
-            src/ dist/pob2-win-portable/src/
+          $srcExcludeDirs  = @('Export','Builds','TreeData')
+          $srcExcludeFiles = @('Settings.xml','poe_api_response.json','luacov.stats.out',
+                               'HeadlessWrapper.lua','LaunchInstall.lua')
+          $timelessBins    = Get-ChildItem src\Data\TimelessJewelData -Filter *.bin -ErrorAction SilentlyContinue |
+                               Select-Object -ExpandProperty FullName
+          Get-ChildItem -Path src -Recurse | Where-Object {
+            $rel = $_.FullName.Substring((Resolve-Path src).Path.Length + 1)
+            $topDir = $rel.Split([IO.Path]::DirectorySeparatorChar)[0]
+            if ($_.PSIsContainer) { return $false }
+            if ($topDir -in $srcExcludeDirs) { return $false }
+            if ($_.Name -in $srcExcludeFiles) { return $false }
+            if ($timelessBins -contains $_.FullName) { return $false }
+            return $true
+          } | ForEach-Object {
+            $rel  = $_.FullName.Substring((Resolve-Path src).Path.Length + 1)
+            $dest = "dist\pob2-win-portable\src\$rel"
+            New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+            Copy-Item $_.FullName $dest
+          }
 
           # TreeData: .lua/.json for all versions (calc compat with old builds),
-          # image assets only for the latest version — mirrors macOS policy and
-          # the [tree] section of manifest.cfg (Windows fetches images lazily).
-          LATEST_TREE=$(grep -Em1 'treeVersionList[[:space:]]*=' src/GameVersions.lua \
-            | grep -oE '"0_[0-9]+"' | tail -1 | tr -d '"') || true
-          LATEST_TREE="${LATEST_TREE:-0_4}"
-          echo "Latest tree version: $LATEST_TREE"
+          # image assets only for the latest version — mirrors macOS policy.
+          $latestTree = (Select-String -Path src\GameVersions.lua -Pattern 'treeVersionList\s*=' |
+                          Select-Object -First 1).Line |
+                          Select-String -Pattern '"(0_\d+)"' -AllMatches |
+                          Select-Object -ExpandProperty Matches |
+                          Select-Object -Last 1 |
+                          ForEach-Object { $_.Groups[1].Value }
+          if (-not $latestTree) { $latestTree = '0_4' }
+          Write-Host "Latest tree version: $latestTree"
 
-          for VER_DIR in src/TreeData/*/; do
-            VER=$(basename "$VER_DIR")
-            DEST="dist/pob2-win-portable/src/TreeData/$VER"
-            mkdir -p "$DEST"
-            find "$VER_DIR" -maxdepth 1 \( -name '*.lua' -o -name '*.json' \) \
-              -exec cp {} "$DEST/" \;
-            if [[ "$VER" == "$LATEST_TREE" ]]; then
-              find "$VER_DIR" -maxdepth 1 \
-                ! \( -name '*.lua' -o -name '*.json' \) -not -type d \
-                -exec cp {} "$DEST/" \;
-            fi
-          done
+          foreach ($verDir in Get-ChildItem src\TreeData -Directory) {
+            $ver  = $verDir.Name
+            $dest = "dist\pob2-win-portable\src\TreeData\$ver"
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            # Always copy data files
+            Get-ChildItem $verDir.FullName -File |
+              Where-Object { $_.Extension -in '.lua','.json' } |
+              ForEach-Object { Copy-Item $_.FullName $dest }
+            # Image assets only for the latest version
+            if ($ver -eq $latestTree) {
+              Get-ChildItem $verDir.FullName -File |
+                Where-Object { $_.Extension -notin '.lua','.json' } |
+                ForEach-Object { Copy-Item $_.FullName $dest }
+            }
+          }
 
           # Top-level assets
-          cp changelog.txt LICENSE.md help.txt dist/pob2-win-portable/
+          Copy-Item changelog.txt,LICENSE.md,help.txt dist\pob2-win-portable\
 
       - name: Zip portable package
         shell: pwsh
