@@ -89,8 +89,8 @@ rsync -a \
 # Image assets (*.dds.zst, *.png) are only bundled for the latest version —
 # older versions' ~170 MB of textures are omitted, matching the Windows
 # approach where TreeData is fetched lazily by the update system.
-LATEST_TREE=$(grep -m1 'latestTreeVersion\s*=' src/GameVersions.lua \
-    | grep -oE '"[^"]+"' | tail -1 | tr -d '"')
+LATEST_TREE=$(grep -Em1 'treeVersionList[[:space:]]*=' src/GameVersions.lua \
+    | grep -oE '"0_[0-9]+"' | tail -1 | tr -d '"') || true
 LATEST_TREE="${LATEST_TREE:-0_4}"   # fallback if parse fails
 
 for VER_DIR in src/TreeData/*/; do
