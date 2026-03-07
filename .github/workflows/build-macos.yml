@@ -116,6 +116,13 @@ jobs:
 
       - name: Zip app bundle
         run: |
+          # Strip quarantine and extended attributes before archiving so the zip
+          # does not carry them.  Users will still need to run
+          #   xattr -cr "Path of Building-PoE2.app"
+          # after downloading because macOS re-applies com.apple.quarantine to
+          # anything fetched from the internet.  Without notarization this is
+          # unavoidable; see README for instructions.
+          xattr -cr "dist/Path of Building-PoE2.app"
           ditto -c -k --keepParent \
             "dist/Path of Building-PoE2.app" \
             "dist/Path-of-Building-PoE2-macos.zip"

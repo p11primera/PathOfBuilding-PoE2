@@ -16,12 +16,13 @@ Download the latest `Path-of-Building-PoE2-macos.zip` from the
 
 Unzip and move `Path of Building-PoE2.app` to your Applications folder.
 
-**First launch:** macOS may block the app because it is from an unidentified developer.
-Right-click the app and choose **Open**, then confirm in the dialog.
-Alternatively, run once in Terminal:
+**First launch:** macOS may block the app with a "damaged and can't be opened" message
+because it is not notarized and macOS applies the quarantine flag to anything downloaded
+from the internet.  Right-click the app and choose **Open**, then confirm in the dialog.
+If that does not work, run once in Terminal:
 
 ```sh
-xattr -d com.apple.quarantine "/Applications/Path of Building-PoE2.app"
+xattr -cr "/Applications/Path of Building-PoE2.app"
 ```
 
 User data (builds, settings) is stored in:
