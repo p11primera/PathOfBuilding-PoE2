@@ -1,0 +1,141 @@
+name: Build Windows (portable zip)
+
+on:
+  push:
+    branches:
+      - feature/mac-os-port
+  workflow_dispatch:
+    inputs:
+      sg_ref:
+        description: 'SimpleGraphic branch/tag to pull DLLs from'
+        required: false
+        default: 'feature/macos-port'
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout PoB2 repo
+        uses: actions/checkout@v4
+
+      - name: Checkout SimpleGraphic
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic
+          ref: ${{ github.event.inputs.sg_ref || 'feature/macos-port' }}
+          path: SimpleGraphic
+          submodules: recursive
+
+      - name: Get SimpleGraphic commit SHA
+        id: sg_sha
+        run: echo "sha=$(git -C SimpleGraphic rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Find completed SimpleGraphic Windows build for this SHA
+        id: sg_run
+        run: |
+          RUN_ID=$(gh api \
+            "repos/${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic/actions/workflows/main.yml/runs?head_sha=${{ steps.sg_sha.outputs.sha }}&status=success&per_page=5" \
+            --jq '[.workflow_runs[] | select(.conclusion=="success")] | first | .id // ""')
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download SimpleGraphic.dll artifact
+        id: sg_dll
+        if: steps.sg_run.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: SimpleGraphic-x64-windows.dll
+          path: sg-dlls
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic
+          run-id: ${{ steps.sg_run.outputs.run_id }}
+        continue-on-error: true
+
+      - name: Download SimpleGraphic dependency DLLs artifact
+        id: sg_deps
+        if: steps.sg_run.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: SimpleGraphic-x64-windows-deps.dll
+          path: sg-dlls
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository_owner }}/PathOfBuilding-SimpleGraphic
+          run-id: ${{ steps.sg_run.outputs.run_id }}
+        continue-on-error: true
+
+      - name: Overlay fresh DLLs into runtime (if downloaded)
+        # Falls back silently to the DLLs already committed in runtime/ if the
+        # artifact download failed.
+        if: steps.sg_dll.outcome == 'success'
+        run: cp sg-dlls/*.dll runtime/
+
+      - name: Stage portable directory
+        run: |
+          mkdir -p dist/pob2-win-portable
+
+          # Runtime: exe + DLLs + SimpleGraphic/ fonts dir + lua/ scripts.
+          # Mirrors the [runtime] exclusions in manifest.cfg.
+          rsync -a \
+            --exclude='lua-profiler.lua' \
+            --exclude='msvcr100.dll' \
+            --exclude='SimpleGraphic.cfg' \
+            --exclude='Update.exe' \
+            --exclude='imgui.ini' \
+            runtime/ dist/pob2-win-portable/
+
+          # PoB2 Lua source — mirrors the [program] exclusions in manifest.cfg.
+          rsync -a \
+            --exclude='Settings.xml' \
+            --exclude='poe_api_response.json' \
+            --exclude='luacov.stats.out' \
+            --exclude='Export/' \
+            --exclude='Builds/' \
+            --exclude='TreeData/' \
+            --exclude='HeadlessWrapper.lua' \
+            --exclude='LaunchInstall.lua' \
+            --exclude='Data/TimelessJewelData/*.bin' \
+            src/ dist/pob2-win-portable/src/
+
+          # TreeData: .lua/.json for all versions (calc compat with old builds),
+          # image assets only for the latest version — mirrors macOS policy and
+          # the [tree] section of manifest.cfg (Windows fetches images lazily).
+          LATEST_TREE=$(grep -Em1 'treeVersionList[[:space:]]*=' src/GameVersions.lua \
+            | grep -oE '"0_[0-9]+"' | tail -1 | tr -d '"') || true
+          LATEST_TREE="${LATEST_TREE:-0_4}"
+          echo "Latest tree version: $LATEST_TREE"
+
+          for VER_DIR in src/TreeData/*/; do
+            VER=$(basename "$VER_DIR")
+            DEST="dist/pob2-win-portable/src/TreeData/$VER"
+            mkdir -p "$DEST"
+            find "$VER_DIR" -maxdepth 1 \( -name '*.lua' -o -name '*.json' \) \
+              -exec cp {} "$DEST/" \;
+            if [[ "$VER" == "$LATEST_TREE" ]]; then
+              find "$VER_DIR" -maxdepth 1 \
+                ! \( -name '*.lua' -o -name '*.json' \) -not -type d \
+                -exec cp {} "$DEST/" \;
+            fi
+          done
+
+          # Top-level assets
+          cp changelog.txt LICENSE.md help.txt dist/pob2-win-portable/
+
+      - name: Zip portable package
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path   "dist\pob2-win-portable\*" `
+            -DestinationPath "dist\PathOfBuilding-PoE2-win-portable.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pob2-windows-portable
+          path: dist/PathOfBuilding-PoE2-win-portable.zip
+          retention-days: 14
