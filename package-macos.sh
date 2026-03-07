@@ -110,6 +110,13 @@ done
 # Miscellaneous top-level assets
 cp changelog.txt LICENSE.md help.txt "$RESOURCES_DIR/"
 
+# manifest.xml must live beside Launch.lua (in src/) so the engine finds it.
+# Without it devMode stays false, the update check fires on launch, and the
+# UI immediately shows "Update check failed! Invalid local manifest".
+# With it (no branch attr): devMode = true, update checks suppressed, and
+# Version: 0.15.0 shows correctly in the about panel.
+cp manifest.xml "$RESOURCES_DIR/src/"
+
 # App icon for Dock / Finder
 if [[ -f src/AppIcon.icns ]]; then
     cp src/AppIcon.icns "$RESOURCES_DIR/AppIcon.icns"

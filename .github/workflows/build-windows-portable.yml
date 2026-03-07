@@ -143,6 +143,13 @@ jobs:
           # Top-level assets
           Copy-Item changelog.txt,LICENSE.md,help.txt dist\pob2-win-portable\
 
+          # manifest.xml must live beside Launch.lua (in src/) so the engine finds it.
+          # Without it devMode stays false, the update check fires on launch, and the
+          # UI immediately shows "Update check failed! Invalid local manifest".
+          # With it (no branch attr): devMode = true, update checks suppressed, and
+          # Version: 0.15.0 shows correctly in the about panel.
+          Copy-Item manifest.xml dist\pob2-win-portable\src\
+
       - name: Zip portable package
         shell: pwsh
         run: |
