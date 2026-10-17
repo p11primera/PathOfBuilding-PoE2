@@ -425,9 +425,14 @@ describe("TestTreeOptimizer", function()
 			local spec = build.spec
 			local optimizer = build.calcsTab.calcs.optimizer
 
-			-- Get baseline DPS
+			-- Capture baseline DPS through the same code path the optimizer uses
 			runCallback("OnFrame")
-			local baseDPS = build.calcsTab.mainOutput.CombinedDPS or 0
+			local function measureDPS()
+				local calcFunc = build.calcsTab:GetMiscCalculator()
+				local output = calcFunc({ }, true)
+				return (output.FullDPS and output.FullDPS > 0 and output.FullDPS) or output.CombinedDPS or 0
+			end
+			local realDPS_before = measureDPS()
 
 			-- Run the optimizer with modest budget
 			local result = optimizer.runSA(build, {
@@ -442,12 +447,12 @@ describe("TestTreeOptimizer", function()
 			assert.is_not_nil(result.bestAlloc)
 			assert.is_true(result.iterations > 0)
 
-			-- Apply and recalculate
+			-- runSA self-restores bestAlloc to the live spec; re-measure real DPS
 			runCallback("OnFrame")
-			local newDPS = build.calcsTab.mainOutput.CombinedDPS or 0
+			local realDPS_after = measureDPS()
 
-			-- Score should be at least as good (may not improve DPS on a fresh empty build)
-			assert.is_true(result.bestScore >= 0)
+			-- Real calc output must not regress (never assert on result.bestScore)
+			assert.is_true(realDPS_after >= realDPS_before)
 		end)
 
 		it("undo restores original tree", function()
@@ -459,7 +464,7 @@ describe("TestTreeOptimizer", function()
 			-- Snapshot original
 			local original = optimizer.snapshotAlloc(spec)
 			local originalCount = 0
-			for _ in pairs(original) do originalCount = originalCount + 1 end
+			for _ in pairs(original.nodes) do originalCount = originalCount + 1 end
 
 			-- Run optimizer
 			local result = optimizer.runSA(build, {
@@ -503,7 +508,108 @@ describe("TestTreeOptimizer", function()
 				})
 
 				-- Verify pinned node is in the best allocation
-				assert.is_true(result.bestAlloc[pinnedId] == true)
+				assert.is_true(result.bestAlloc.nodes[pinnedId] == true)
+			end
+		end)
+	end)
+
+	describe("hardening", function()
+		it("scores candidates with an empty override diff (no double-count)", function()
+			local seen = { }
+			build.calcsTab.GetMiscCalculator = function()
+				return function(override, useFullDPS)
+					table.insert(seen, { override = override, useFullDPS = useFullDPS })
+					return { CombinedDPS = 1000, LifeUnreserved = 3000 }
+				end
+			end
+			local result = build.calcsTab.calcs.optimizer.runSA(build, {
+				maxIterations = 30,
+				pointBudget = 10,
+				seed = 42,
+			})
+			assert.is_not_nil(result)
+			assert.is_true(#seen > 0, "calcFunc should have been called at least once")
+			for _, call in ipairs(seen) do
+				assert.are.equal("table", type(call.override))
+				assert.is_nil(next(call.override)) -- must be an EMPTY diff, keyed tables included
+				assert.is_true(call.useFullDPS)
+			end
+		end)
+
+		it("deterministic results with a fixed seed", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local startSnap = optimizer.snapshotAlloc(build.spec)
+			local r1 = optimizer.runSA(build, {
+				maxIterations = 50,
+				pointBudget = 12,
+				seed = 7,
+			})
+			optimizer.restoreAlloc(build.spec, startSnap)
+			local r2 = optimizer.runSA(build, {
+				maxIterations = 50,
+				pointBudget = 12,
+				seed = 7,
+			})
+			assert.are.equal(r1.bestScore, r2.bestScore)
+		end)
+
+		it("allocates pinned nodes in the synchronous runSA path", function()
+			local spec = build.spec
+			local optimizer = build.calcsTab.calcs.optimizer
+			spec:BuildAllDependsAndPaths()
+
+			-- Pick an unallocated Normal node exactly 1 hop from the tree
+			local pinnedId = nil
+			for id, node in pairs(spec.nodes) do
+				if node.type == "Normal" and not node.alloc and node.pathDist == 1 then
+					pinnedId = id
+					break
+				end
+			end
+			assert.is_not_nil(pinnedId, "should find a reachable Normal node")
+
+			local result = optimizer.runSA(build, {
+				maxIterations = 50,
+				pointBudget = 15,
+				pinnedNodes = { [pinnedId] = true },
+				seed = 11,
+			})
+			assert.is_true(result.bestAlloc.nodes[pinnedId] == true)
+		end)
+
+		it("respects budget using game accounting", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local result = optimizer.runSA(build, {
+				maxIterations = 40,
+				pointBudget = 8,
+				seed = 5,
+			})
+			assert.is_true(result.iterations > 0)
+			-- runSA self-restores bestAlloc to the live spec
+			local used = build.spec:CountAllocNodes()
+			assert.is_true(used <= 8, "game-accounted points should fit the budget, got " .. tostring(used))
+		end)
+
+		it("restoreAlloc round-trips through the PassiveSpec API", function()
+			local spec = build.spec
+			local optimizer = build.calcsTab.calcs.optimizer
+			spec:BuildAllDependsAndPaths()
+
+			local reachable = optimizer.getReachableNodes(spec)
+			assert.is_true(#reachable > 0, "should have reachable nodes")
+			spec:AllocNode(reachable[1])
+
+			local snap = optimizer.snapshotAlloc(spec)
+			local before = 0
+			for _ in pairs(spec.allocNodes) do before = before + 1 end
+
+			optimizer.restoreAlloc(spec, snap)
+
+			local after = 0
+			for _ in pairs(spec.allocNodes) do after = after + 1 end
+			assert.are.equal(before, after)
+			for id in pairs(snap.nodes) do
+				assert.is_true(spec.allocNodes[id] ~= nil, "restored node " .. tostring(id) .. " should be allocated")
 			end
 		end)
 	end)
