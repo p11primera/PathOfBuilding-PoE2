@@ -26,26 +26,47 @@ optimizer.defaultDefenceWeights = {
 -- Compute raw defence metric from output, using weights
 function optimizer.calcDefenceMetric(output, weights)
 	local w = weights or optimizer.defaultDefenceWeights
+	local es = output.EnergyShieldRecoveryCap
+	if not es or es == 0 then
+		es = output.EnergyShield or 0
+	end
 	return (w.Life or 0) * (output.LifeUnreserved or 0) / 3000
-		+ (w.EnergyShield or 0) * (output.EnergyShieldRecoveryCap or output.EnergyShield or 0) / 3000
+		+ (w.EnergyShield or 0) * es / 3000
 		+ (w.Armour or 0) * (output.Armour or 0) / 10000
 		+ (w.Evasion or 0) * (output.Evasion or 0) / 10000
 		+ (w.LifeRegen or 0) * (output.LifeRegenRecovery or 0) / 500
 		+ (w.ESRegen or 0) * (output.EnergyShieldRegenRecovery or 0) / 1000
 end
 
+-- Candidate/base ratio that degrades gracefully when base == 0:
+-- relative improvement when possible, bounded absolute term when not.
+local function safeRatio(candidate, base, scale)
+	if base > 0 then
+		return candidate / base
+	end
+	return candidate / (candidate + scale)   -- in [0, 1) when base is 0
+end
+
+local DPS_SCALE = 1000    -- reference DPS for zero-base normalisation
+local DEFENCE_SCALE = 1   -- defence metric is already O(1)-normalised
+
+local function getDPS(output)
+	local fullDPS = output.FullDPS
+	if fullDPS and fullDPS > 0 then
+		return fullDPS
+	end
+	return output.CombinedDPS or 0
+end
+
 -- Calculate weighted score combining offence and defence.
 -- alpha: 0.0 = pure defence, 1.0 = pure offence.
 -- customWeights: optional table overriding defence stat weights.
 function optimizer.calcScore(output, baseOutput, alpha, customWeights)
-	-- Offence: ratio of CombinedDPS to base
-	local baseDPS = m_max(1, baseOutput.CombinedDPS or 0)
-	local offenceRatio = (output.CombinedDPS or 0) / baseDPS
-
-	-- Defence: ratio of defence metric to base
-	local baseDefence = m_max(0.001, optimizer.calcDefenceMetric(baseOutput, customWeights))
-	local defenceRatio = optimizer.calcDefenceMetric(output, customWeights) / baseDefence
-
+	local offenceRatio = safeRatio(getDPS(output), getDPS(baseOutput), DPS_SCALE)
+	local defenceRatio = safeRatio(
+		optimizer.calcDefenceMetric(output, customWeights),
+		optimizer.calcDefenceMetric(baseOutput, customWeights),
+		DEFENCE_SCALE)
 	return alpha * offenceRatio + (1 - alpha) * defenceRatio, offenceRatio, defenceRatio
 end
 
@@ -186,15 +207,12 @@ local function trimToBudget(spec, pinnedNodes, budget)
 	end
 end
 
--- Evaluate a tree allocation using the calc engine.
--- The calcFunc from getMiscCalculator can accept an override with addNodes.
--- We build a set of all allocated non-start nodes to pass.
+-- Evaluate the CURRENT live tree via a full recalc (empty override diff —
+-- calcFunc overrides are applied ON TOP of the live spec, so passing the
+-- already-allocated set would double-count notable/mastery modifiers).
+-- useFullDPS = true matches the design doc (sustained DPS).
 local function evaluateAlloc(calcFunc, spec)
-	local addNodes = { }
-	for id, node in pairs(spec.allocNodes) do
-		addNodes[node] = true
-	end
-	return calcFunc({ addNodes = addNodes }, false)
+	return calcFunc({ }, true)
 end
 
 local SA_DEFAULTS = {
@@ -228,9 +246,9 @@ function optimizer.initSAState(build, params)
 	state.temp = state.T0
 	state.stagnantCount, state.reheats, state.evalCount = 0, 0, 0
 	if params.seed then m_randomseed(params.seed) end
-	local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
+	local calcFunc = build.calcsTab:GetMiscCalculator()
 	state.calcFunc = calcFunc
-	state.calcBase = calcBase
+	state.calcBase = calcFunc({ }, true)
 	local score, offence, defence = optimizer.calcScore(calcBase, calcBase, state.alpha, state.weights)
 	state.currentAlloc = optimizer.snapshotAlloc(state.spec)
 	state.currentScore = score
