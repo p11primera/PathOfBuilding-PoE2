@@ -193,15 +193,10 @@ function optimizer.acceptanceProbability(currentScore, newScore, temperature)
 	return m_exp((newScore - currentScore) / m_max(temperature, 0.0001))
 end
 
--- Count non-start allocated nodes (the "used points").
+-- Count points used per the game's own accounting (excludes ascendancy,
+-- free-allocate and start nodes, matching PassiveSpec:CountAllocNodes).
 local function countUsedPoints(spec)
-	local count = 0
-	for id, node in pairs(spec.allocNodes) do
-		if node.type ~= "ClassStart" and node.type ~= "AscendClassStart" then
-			count = count + 1
-		end
-	end
-	return count
+	return spec:CountAllocNodes()
 end
 
 -- Trim excess nodes to fit within point budget.
@@ -251,6 +246,7 @@ function optimizer.initSAState(build, params)
 	state.earlyStopStagnant = opt("earlyStopStagnant")
 	state.maxReheats = opt("maxReheats")
 	state.spec = build.spec
+	state.skippedPins = optimizer.ensurePinnedAllocated(state.spec, state.pinned)
 	state.temp = state.T0
 	state.stagnantCount, state.reheats, state.evalCount = 0, 0, 0
 	if params.seed then m_randomseed(params.seed) end
@@ -316,6 +312,7 @@ function optimizer.saResult(state, iter)
 		bestDefence = state.bestDefence,
 		iterations = iter,
 		evalCount = state.evalCount,
+		skippedPins = state.skippedPins,
 	}
 end
 
@@ -356,14 +353,22 @@ end
 
 -- Ensure all pinned nodes are allocated (and paths to them).
 -- pinnedNodes: { [nodeId] = true }
+-- Returns array of pinned node ids that could NOT be allocated (unreachable).
 function optimizer.ensurePinnedAllocated(spec, pinnedNodes)
 	spec:BuildAllDependsAndPaths()
+	local skipped = { }
 	for id in pairs(pinnedNodes) do
 		local node = spec.nodes[id]
-		if node and not node.alloc and node.path then
+		if not node or not node.path then
+			t_insert(skipped, id)
+		elseif not node.alloc then
 			spec:AllocNode(node)
+			if not node.alloc then
+				t_insert(skipped, id)
+			end
 		end
 	end
+	return skipped
 end
 
 -- Create a coroutine that runs SA and yields periodically for UI responsiveness.
