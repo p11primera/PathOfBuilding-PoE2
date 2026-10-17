@@ -14,7 +14,6 @@ local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost",
 	self.Control(anchor, rect)
 	self.ControlHost()
 	self.build = build
-	self.optimizer = build.calcsTab.calcs.optimizer
 	self.pinnedNodes = { }           -- { [nodeId] = true }
 	self.pinnedNodesList = { }       -- array of { id, name, type } for display
 	self.pinMode = false
@@ -29,28 +28,28 @@ local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost",
 	local width = rect[3]
 
 	-- Offence/Defence priority slider
-	self.controls.alphaLabel = new("LabelControl", { "TOPLEFT", self, "TOPLEFT" }, { 10, 8, 0, 16 }, "Defence")
-	self.controls.alphaSlider = new("SliderControl", { "LEFT", self.controls.alphaLabel, "RIGHT" }, { 8, 0, 150, 16 }, function(val)
+	self.controls.alphaLabel = new("LabelControl"):LabelControl({ "TOPLEFT", self, "TOPLEFT" }, { 10, 8, 0, 16 }, "Defence")
+	self.controls.alphaSlider = new("SliderControl"):SliderControl({ "LEFT", self.controls.alphaLabel, "RIGHT" }, { 8, 0, 150, 16 }, function(val)
 		self.alpha = val
 	end)
 	self.controls.alphaSlider:SetVal(0.5)
-	self.controls.alphaLabelR = new("LabelControl", { "LEFT", self.controls.alphaSlider, "RIGHT" }, { 8, 0, 0, 16 }, "Offence")
+	self.controls.alphaLabelR = new("LabelControl"):LabelControl({ "LEFT", self.controls.alphaSlider, "RIGHT" }, { 8, 0, 0, 16 }, "Offence")
 
 	-- Point budget
-	self.controls.budgetLabel = new("LabelControl", { "LEFT", self.controls.alphaLabelR, "RIGHT" }, { 20, 0, 0, 16 }, "Points:")
-	self.controls.budgetEdit = new("EditControl", { "LEFT", self.controls.budgetLabel, "RIGHT" }, { 4, 0, 50, 18 }, "", nil, "%D", 3, function(buf)
+	self.controls.budgetLabel = new("LabelControl"):LabelControl({ "LEFT", self.controls.alphaLabelR, "RIGHT" }, { 20, 0, 0, 16 }, "Points:")
+	self.controls.budgetEdit = new("EditControl"):EditControl({ "LEFT", self.controls.budgetLabel, "RIGHT" }, { 4, 0, 50, 18 }, "", nil, "%D", 3, function(buf)
 		self.pointBudget = tonumber(buf) or 0
 	end)
 
 	-- Pin mode toggle
-	self.controls.pinModeBtn = new("ButtonControl", { "LEFT", self.controls.budgetEdit, "RIGHT" }, { 12, 0, 100, 18 },
+	self.controls.pinModeBtn = new("ButtonControl"):ButtonControl({ "LEFT", self.controls.budgetEdit, "RIGHT" }, { 12, 0, 100, 18 },
 		function() return self.pinMode and "Pin Mode: ON" or "Pin Mode: OFF" end,
 		function()
 			self.pinMode = not self.pinMode
 		end)
 
 	-- Start/Stop button
-	self.controls.startBtn = new("ButtonControl", { "LEFT", self.controls.pinModeBtn, "RIGHT" }, { 12, 0, 80, 18 },
+	self.controls.startBtn = new("ButtonControl"):ButtonControl({ "LEFT", self.controls.pinModeBtn, "RIGHT" }, { 12, 0, 80, 18 },
 		function() return self.running and "Stop" or "Start" end,
 		function()
 			if self.running then
@@ -61,14 +60,14 @@ local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost",
 		end)
 
 	-- Progress label
-	self.controls.progressLabel = new("LabelControl", { "LEFT", self.controls.startBtn, "RIGHT" }, { 12, 0, 0, 16 }, "")
+	self.controls.progressLabel = new("LabelControl"):LabelControl({ "LEFT", self.controls.startBtn, "RIGHT" }, { 12, 0, 0, 16 }, "")
 
 	-- Second row: Pinned nodes search
-	self.controls.pinSearchLabel = new("LabelControl", { "TOPLEFT", self, "TOPLEFT" }, { 10, 32, 0, 16 }, "Pin Node:")
-	self.controls.pinSearch = new("EditControl", { "LEFT", self.controls.pinSearchLabel, "RIGHT" }, { 4, 0, 200, 18 }, "", "Search...", nil, nil, function(buf)
+	self.controls.pinSearchLabel = new("LabelControl"):LabelControl({ "TOPLEFT", self, "TOPLEFT" }, { 10, 32, 0, 16 }, "Pin Node:")
+	self.controls.pinSearch = new("EditControl"):EditControl({ "LEFT", self.controls.pinSearchLabel, "RIGHT" }, { 4, 0, 200, 18 }, "", "Search...", nil, nil, function(buf)
 		self:UpdateSearchResults(buf)
 	end)
-	self.controls.pinSearchResults = new("DropDownControl", { "LEFT", self.controls.pinSearch, "RIGHT" }, { 4, 0, 200, 18 }, { }, function(index, value)
+	self.controls.pinSearchResults = new("DropDownControl"):DropDownControl({ "LEFT", self.controls.pinSearch, "RIGHT" }, { 4, 0, 200, 18 }, { }, function(index, value)
 		if value and value.id then
 			self:PinNode(value.id, value.name, value.type)
 			self.controls.pinSearch:SetText("")
@@ -76,16 +75,16 @@ local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost",
 	end)
 
 	-- Pinned nodes count label
-	self.controls.pinnedLabel = new("LabelControl", { "LEFT", self.controls.pinSearchResults, "RIGHT" }, { 12, 0, 0, 16 },
+	self.controls.pinnedLabel = new("LabelControl"):LabelControl({ "LEFT", self.controls.pinSearchResults, "RIGHT" }, { 12, 0, 0, 16 },
 		function() return "Pinned: " .. #self.pinnedNodesList end)
 
 	-- Apply / Reset buttons (row 3, shown after optimization)
-	self.controls.applyBtn = new("ButtonControl", { "TOPLEFT", self, "TOPLEFT" }, { 10, 56, 120, 18 }, "Apply Best Tree", function()
+	self.controls.applyBtn = new("ButtonControl"):ButtonControl({ "TOPLEFT", self, "TOPLEFT" }, { 10, 56, 120, 18 }, "Apply Best Tree", function()
 		self:ApplyBestTree()
 	end)
 	self.controls.applyBtn.shown = function() return self.bestResult ~= nil end
 
-	self.controls.resetBtn = new("ButtonControl", { "LEFT", self.controls.applyBtn, "RIGHT" }, { 8, 0, 120, 18 }, "Reset to Original", function()
+	self.controls.resetBtn = new("ButtonControl"):ButtonControl({ "LEFT", self.controls.applyBtn, "RIGHT" }, { 8, 0, 120, 18 }, "Reset to Original", function()
 		self:ResetToOriginal()
 	end)
 	self.controls.resetBtn.shown = function() return self.originalAlloc ~= nil end
@@ -93,6 +92,14 @@ local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost",
 	-- Default budget from build level
 	self:UpdateBudgetFromLevel()
 end)
+
+function OptimizerPanelClass:GetOptimizer()
+	if not self.optimizer then
+		local calcsTab = self.build.calcsTab
+		self.optimizer = calcsTab and calcsTab.calcs and calcsTab.calcs.optimizer
+	end
+	return self.optimizer
+end
 
 function OptimizerPanelClass:UpdateBudgetFromLevel()
 	local level = self.build.characterLevel or 1
@@ -119,7 +126,7 @@ function OptimizerPanelClass:UnpinNode(id)
 end
 
 function OptimizerPanelClass:UpdateSearchResults(query)
-	local results = self.optimizer.findNodesByName(self.build.spec, query)
+	local results = self:GetOptimizer().findNodesByName(self.build.spec, query)
 	local dropList = { }
 	for i = 1, math.min(#results, 10) do
 		t_insert(dropList, {
