@@ -284,17 +284,17 @@ function TreeTabClass:TreeTab(build)
 	self.controls.powerReportList.shown = false
 
 	-- Optimizer Button
-	self.controls.optimizerToggle = new("ButtonControl", { "LEFT", self.controls.powerReport, "RIGHT" }, { 8, 0, 150, 20 },
+	self.controls.optimizerToggle = new("ButtonControl"):ButtonControl({ "LEFT", self.controls.powerReport, "RIGHT" }, { 8, 0, 150, 20 },
 		function() return self.controls.optimizerPanel.shown and "Hide Optimizer" or "Show Optimizer" end,
 		function()
 			self.controls.optimizerPanel.shown = not self.controls.optimizerPanel.shown
 		end)
 
 	-- Optimizer Panel
-	self.controls.optimizerPanel = new("OptimizerPanel",
+	self.controls.optimizerPanel = new("OptimizerPanel"):OptimizerPanel(
 		{ "TOPLEFT", self.controls.specSelect, "BOTTOMLEFT" },
 		{ 0, 4, 700, 120 },
-		build)
+		self.build)
 	self.controls.optimizerPanel.shown = false
 
 	-- Progress callback from the CalcsTab power builder coroutine
