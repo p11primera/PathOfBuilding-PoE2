@@ -7,6 +7,7 @@ local m_max = math.max
 local m_exp = math.exp
 local m_floor = math.floor
 local m_random = math.random
+local m_randomseed = math.randomseed
 local t_insert = table.insert
 local t_remove = table.remove
 
@@ -45,7 +46,7 @@ function optimizer.calcScore(output, baseOutput, alpha, customWeights)
 	local baseDefence = m_max(0.001, optimizer.calcDefenceMetric(baseOutput, customWeights))
 	local defenceRatio = optimizer.calcDefenceMetric(output, customWeights) / baseDefence
 
-	return alpha * offenceRatio + (1 - alpha) * defenceRatio
+	return alpha * offenceRatio + (1 - alpha) * defenceRatio, offenceRatio, defenceRatio
 end
 
 -- Get all unallocated nodes exactly 1 hop from the current tree.
@@ -196,88 +197,115 @@ local function evaluateAlloc(calcFunc, spec)
 	return calcFunc({ addNodes = addNodes }, false)
 end
 
+local SA_DEFAULTS = {
+	initialTemp = 1.0,
+	coolingRate = 0.9997,
+	reheatFactor = 0.5,
+	maxStagnant = 500,
+	earlyStopStagnant = 2000,
+	maxReheats = 3,
+	maxIterations = 10000,
+	pointBudget = 50,
+	alpha = 0.5,
+}
+
+function optimizer.initSAState(build, params)
+	params = params or { }
+	local state = { }
+	local function opt(key) return params[key] or SA_DEFAULTS[key] end
+	state.alpha = opt("alpha")
+	state.maxIter = opt("maxIterations")
+	state.budget = opt("pointBudget")
+	state.pinned = params.pinnedNodes or { }
+	state.weights = params.customWeights
+	state.T0 = opt("initialTemp")
+	state.coolingRate = opt("coolingRate")
+	state.reheatFactor = opt("reheatFactor")
+	state.maxStagnant = opt("maxStagnant")
+	state.earlyStopStagnant = opt("earlyStopStagnant")
+	state.maxReheats = opt("maxReheats")
+	state.spec = build.spec
+	state.temp = state.T0
+	state.stagnantCount, state.reheats, state.evalCount = 0, 0, 0
+	if params.seed then m_randomseed(params.seed) end
+	local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
+	state.calcFunc = calcFunc
+	state.calcBase = calcBase
+	local score, offence, defence = optimizer.calcScore(calcBase, calcBase, state.alpha, state.weights)
+	state.currentAlloc = optimizer.snapshotAlloc(state.spec)
+	state.currentScore = score
+	state.bestAlloc = optimizer.snapshotAlloc(state.spec)
+	state.bestScore = score
+	state.bestOffence = offence
+	state.bestDefence = defence
+	return state
+end
+
+-- One SA iteration. Returns "ok" or "earlystop".
+function optimizer.saStep(state)
+	local spec = state.spec
+	local prevAlloc = optimizer.snapshotAlloc(spec)
+	local mutated = optimizer.mutate(spec, state.pinned)
+	if mutated then
+		trimToBudget(spec, state.pinned, state.budget)
+		local output = evaluateAlloc(state.calcFunc, spec)
+		state.evalCount = state.evalCount + 1
+		local newScore, offence, defence = optimizer.calcScore(output, state.calcBase, state.alpha, state.weights)
+		local prob = optimizer.acceptanceProbability(state.currentScore, newScore, state.temp)
+		if m_random() < prob then
+			state.currentAlloc = optimizer.snapshotAlloc(spec)
+			state.currentScore = newScore
+			if newScore > state.bestScore then
+				state.bestAlloc = optimizer.snapshotAlloc(spec)
+				state.bestScore = newScore
+				state.bestOffence = offence
+				state.bestDefence = defence
+				state.stagnantCount = 0
+			else
+				state.stagnantCount = state.stagnantCount + 1
+			end
+		else
+			optimizer.restoreAlloc(spec, prevAlloc)
+			state.stagnantCount = state.stagnantCount + 1
+		end
+	else
+		state.stagnantCount = state.stagnantCount + 1
+	end
+	state.temp = state.temp * state.coolingRate
+	if state.stagnantCount >= state.earlyStopStagnant then
+		return "earlystop"
+	end
+	if state.stagnantCount >= state.maxStagnant and state.reheats < state.maxReheats then
+		state.temp = state.T0 * state.reheatFactor
+		state.reheats = state.reheats + 1
+	end
+	return "ok"
+end
+
+function optimizer.saResult(state, iter)
+	return {
+		bestAlloc = state.bestAlloc,
+		bestScore = state.bestScore,
+		bestOffence = state.bestOffence,
+		bestDefence = state.bestDefence,
+		iterations = iter,
+		evalCount = state.evalCount,
+	}
+end
+
 -- Run Simulated Annealing optimization (synchronous, blocking).
 -- params: { alpha, maxIterations, pointBudget, pinnedNodes, customWeights }
 -- Returns: { bestAlloc, bestScore, iterations }
 function optimizer.runSA(build, params)
-	local alpha = params.alpha or 0.5
-	local maxIter = params.maxIterations or 10000
-	local budget = params.pointBudget or 50
-	local pinned = params.pinnedNodes or {}
-	local weights = params.customWeights
-
-	local spec = build.spec
-
-	-- Get calculator
-	local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
-	local baseScore = optimizer.calcScore(calcBase, calcBase, alpha, weights)
-
-	-- Initialize from current tree
-	local currentAlloc = optimizer.snapshotAlloc(spec)
-	local currentScore = optimizer.calcScore(calcBase, calcBase, alpha, weights)
-	local bestAlloc = optimizer.snapshotAlloc(spec)
-	local bestScore = currentScore
-
-	-- SA parameters
-	local T0 = 1.0
-	local coolingRate = 0.9997
-	local temp = T0
-	local stagnantCount = 0
-	local maxStagnant = 500
-	local earlyStopStagnant = 2000
-
-	for iter = 1, maxIter do
-		local prevAlloc = optimizer.snapshotAlloc(spec)
-
-		local mutated = optimizer.mutate(spec, pinned)
-		if mutated then
-			trimToBudget(spec, pinned, budget)
-
-			local output = evaluateAlloc(calcFunc, spec)
-			local newScore = optimizer.calcScore(output, calcBase, alpha, weights)
-
-			local prob = optimizer.acceptanceProbability(currentScore, newScore, temp)
-			if m_random() < prob then
-				currentAlloc = optimizer.snapshotAlloc(spec)
-				currentScore = newScore
-				if newScore > bestScore then
-					bestAlloc = optimizer.snapshotAlloc(spec)
-					bestScore = newScore
-					stagnantCount = 0
-				else
-					stagnantCount = stagnantCount + 1
-				end
-			else
-				optimizer.restoreAlloc(spec, prevAlloc)
-				stagnantCount = stagnantCount + 1
-			end
-		else
-			stagnantCount = stagnantCount + 1
-		end
-
-		temp = temp * coolingRate
-
-		if stagnantCount >= maxStagnant and stagnantCount < earlyStopStagnant then
-			temp = T0 * 0.5
-			stagnantCount = 0
-		end
-
-		if stagnantCount >= earlyStopStagnant then
-			optimizer.restoreAlloc(spec, bestAlloc)
-			return {
-				bestAlloc = bestAlloc,
-				bestScore = bestScore,
-				iterations = iter,
-			}
+	local state = optimizer.initSAState(build, params)
+	for iter = 1, state.maxIter do
+		if optimizer.saStep(state) == "earlystop" then
+			optimizer.restoreAlloc(state.spec, state.bestAlloc)
+			return optimizer.saResult(state, iter)
 		end
 	end
-
-	optimizer.restoreAlloc(spec, bestAlloc)
-	return {
-		bestAlloc = bestAlloc,
-		bestScore = bestScore,
-		iterations = maxIter,
-	}
+	optimizer.restoreAlloc(state.spec, state.bestAlloc)
+	return optimizer.saResult(state, state.maxIter)
 end
 
 -- Search for nodes by name (case-insensitive substring match).
@@ -317,99 +345,26 @@ end
 -- While running, yields { progress, iteration, bestScore } tables for progress updates.
 function optimizer.createOptimizerCoroutine(build, params)
 	return coroutine.create(function()
-		local alpha = params.alpha or 0.5
-		local maxIter = params.maxIterations or 10000
-		local budget = params.pointBudget or 50
-		local pinned = params.pinnedNodes or {}
-		local weights = params.customWeights
-
-		local spec = build.spec
-
-		-- Ensure pinned nodes are allocated first
-		optimizer.ensurePinnedAllocated(spec, pinned)
-
-		-- Get calculator
-		local calcFunc, calcBase = build.calcsTab:GetMiscCalculator()
-
-		-- Initialize
-		local currentAlloc = optimizer.snapshotAlloc(spec)
-		local currentScore = optimizer.calcScore(calcBase, calcBase, alpha, weights)
-		local bestAlloc = optimizer.snapshotAlloc(spec)
-		local bestScore = currentScore
-
-		-- SA state
-		local T0 = 1.0
-		local coolingRate = 0.9997
-		local temp = T0
-		local stagnantCount = 0
-		local maxStagnant = 500
-		local earlyStopStagnant = 2000
-
+		local state = optimizer.initSAState(build, params)
 		local start = GetTime and GetTime() or os.clock() * 1000
-
-		for iter = 1, maxIter do
-			local prevAlloc = optimizer.snapshotAlloc(spec)
-
-			local mutated = optimizer.mutate(spec, pinned)
-			if mutated then
-				trimToBudget(spec, pinned, budget)
-
-				local output = evaluateAlloc(calcFunc, spec)
-				local newScore = optimizer.calcScore(output, calcBase, alpha, weights)
-
-				local prob = optimizer.acceptanceProbability(currentScore, newScore, temp)
-				if m_random() < prob then
-					currentAlloc = optimizer.snapshotAlloc(spec)
-					currentScore = newScore
-					if newScore > bestScore then
-						bestAlloc = optimizer.snapshotAlloc(spec)
-						bestScore = newScore
-						stagnantCount = 0
-					else
-						stagnantCount = stagnantCount + 1
-					end
-				else
-					optimizer.restoreAlloc(spec, prevAlloc)
-					stagnantCount = stagnantCount + 1
-				end
-			else
-				stagnantCount = stagnantCount + 1
+		for iter = 1, state.maxIter do
+			if optimizer.saStep(state) == "earlystop" then
+				optimizer.restoreAlloc(state.spec, state.bestAlloc)
+				return optimizer.saResult(state, iter)
 			end
-
-			temp = temp * coolingRate
-
-			if stagnantCount >= maxStagnant and stagnantCount < earlyStopStagnant then
-				temp = T0 * 0.5
-				stagnantCount = 0
-			end
-
-			if stagnantCount >= earlyStopStagnant then
-				optimizer.restoreAlloc(spec, bestAlloc)
-				return {
-					bestAlloc = bestAlloc,
-					bestScore = bestScore,
-					iterations = iter,
-				}
-			end
-
 			-- Yield every ~100ms for UI responsiveness
 			local now = GetTime and GetTime() or os.clock() * 1000
 			if now - start > 100 then
 				coroutine.yield({
-					progress = iter / maxIter,
+					progress = iter / state.maxIter,
 					iteration = iter,
-					bestScore = bestScore,
+					bestScore = state.bestScore,
 				})
 				start = now
 			end
 		end
-
-		optimizer.restoreAlloc(spec, bestAlloc)
-		return {
-			bestAlloc = bestAlloc,
-			bestScore = bestScore,
-			iterations = maxIter,
-		}
+		optimizer.restoreAlloc(state.spec, state.bestAlloc)
+		return optimizer.saResult(state, state.maxIter)
 	end)
 end
 
