@@ -133,45 +133,53 @@ function optimizer.restoreAlloc(spec, snapshot)
 end
 
 -- Mutation: Add a random reachable node.
--- Returns true if successful.
+-- Returns true only if the tree actually changed (AllocNode can silently
+-- no-op when node.path / GetEffectiveAllocationPath is nil).
 function optimizer.mutateAdd(spec, pinnedNodes)
 	local reachable = optimizer.getReachableNodes(spec)
 	if #reachable == 0 then return false end
 	local node = reachable[m_random(#reachable)]
+	if spec.allocNodes[node.id] then return false end
 	spec:AllocNode(node)
-	return true
+	return spec.allocNodes[node.id] ~= nil
 end
 
 -- Mutation: Remove a random leaf node.
--- Returns true if successful.
+-- Returns true only if the tree actually changed.
 function optimizer.mutateRemove(spec, pinnedNodes)
 	local leaves = optimizer.getLeafNodes(spec, pinnedNodes)
 	if #leaves == 0 then return false end
 	local node = leaves[m_random(#leaves)]
 	spec:DeallocNode(node)
-	return true
+	return spec.allocNodes[node.id] == nil
 end
 
 -- Mutation: Swap — remove a leaf, then add a reachable node.
--- Returns true if successful.
+-- On partial failure (remove succeeded, add found nothing) the spec is
+-- restored, so callers never see a mutated tree reported as "no mutation".
 function optimizer.mutateSwap(spec, pinnedNodes)
-	if not optimizer.mutateRemove(spec, pinnedNodes) then return false end
-	if not optimizer.mutateAdd(spec, pinnedNodes) then return false end
+	local prev = optimizer.snapshotAlloc(spec)
+	if not optimizer.mutateRemove(spec, pinnedNodes) then
+		return false
+	end
+	if not optimizer.mutateAdd(spec, pinnedNodes) then
+		optimizer.restoreAlloc(spec, prev)
+		return false
+	end
 	return true
 end
 
 -- Apply a random mutation based on weights.
--- Returns true if mutation succeeded.
+-- (Design's fourth operator, Path Shift, is intentionally dropped for v1:
+-- it needs a real re-route algorithm; as a Swap alias it only wasted 10%
+-- of iterations. Stretch goal at the end of this plan.)
 function optimizer.mutate(spec, pinnedNodes)
 	local roll = m_random(100)
 	if roll <= 40 then
 		return optimizer.mutateAdd(spec, pinnedNodes)
 	elseif roll <= 70 then
 		return optimizer.mutateRemove(spec, pinnedNodes)
-	elseif roll <= 90 then
-		return optimizer.mutateSwap(spec, pinnedNodes)
 	else
-		-- Path shift: swap remove then add (simplified version)
 		return optimizer.mutateSwap(spec, pinnedNodes)
 	end
 end
