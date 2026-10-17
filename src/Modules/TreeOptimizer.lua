@@ -104,29 +104,67 @@ function optimizer.getLeafNodes(spec, pinnedNodes)
 	return leaves
 end
 
--- Snapshot current allocation as a set of node IDs.
+-- Snapshot current allocation (node ids + per-node state that must survive
+-- restore: allocMode for weapon-set nodes, mastery selections).
+-- Mastery selections live at spec-level: spec.masterySelections[nodeId] = effectId.
 function optimizer.snapshotAlloc(spec)
-	local snapshot = { }
-	for id in pairs(spec.allocNodes) do
-		snapshot[id] = true
+	local snapshot = { nodes = { }, allocMode = { }, mastery = { } }
+	for id, node in pairs(spec.allocNodes) do
+		snapshot.nodes[id] = true
+		snapshot.allocMode[id] = node.allocMode
+		if spec.masterySelections[id] then
+			snapshot.mastery[id] = spec.masterySelections[id]
+		end
 	end
 	return snapshot
 end
 
--- Restore allocation from a snapshot.
+-- Restore allocation through the PassiveSpec API (keeps allocMode,
+-- multiple-choice invariants, mastery bookkeeping consistent).
 function optimizer.restoreAlloc(spec, snapshot)
-	-- Clear all allocations
-	for id, node in pairs(spec.allocNodes) do
-		node.alloc = false
+	local targetIds = snapshot.nodes or snapshot   -- tolerate legacy plain-set
+	-- 1. deallocate everything currently allocated, one node at a time.
+	-- Use DeallocSingleNode (not DeallocNode) so we don't cascade to depends
+	-- or mutate hashOverrides; the clear phase removes exactly what's set.
+	local toClear = { }
+	for id in pairs(spec.allocNodes) do
+		t_insert(toClear, id)
 	end
-	wipeTable(spec.allocNodes)
-
-	-- Restore from snapshot
-	for id in pairs(snapshot) do
+	for _, id in ipairs(toClear) do
 		local node = spec.nodes[id]
 		if node then
-			node.alloc = true
-			spec.allocNodes[id] = node
+			spec:DeallocSingleNode(node)
+		end
+	end
+	-- 2. re-allocate the target set, shallow nodes first so paths exist.
+	-- A fully-allocated snapshot contains its own path nodes, so sorting by
+	-- ascending pathDist keeps each node's path allocated before it is reached.
+	local ids = { }
+	for id in pairs(targetIds) do
+		t_insert(ids, id)
+	end
+	table.sort(ids, function(a, b)
+		local na, nb = spec.nodes[a], spec.nodes[b]
+		return (na and na.pathDist or 0) < (nb and nb.pathDist or 0)
+	end)
+	for _, id in ipairs(ids) do
+		local node = spec.nodes[id]
+		if node and not node.alloc then
+			spec:AllocNode(node)
+		end
+	end
+	-- 3. restore per-node state that AllocNode does not carry.
+	if snapshot.allocMode then
+		for id, mode in pairs(snapshot.allocMode) do
+			local node = spec.nodes[id]
+			if node then
+				node.allocMode = mode
+			end
+		end
+	end
+	if snapshot.mastery then
+		for id, effect in pairs(snapshot.mastery) do
+			spec.masterySelections[id] = effect
 		end
 	end
 	spec:BuildAllDependsAndPaths()

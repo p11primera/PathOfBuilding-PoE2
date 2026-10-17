@@ -198,6 +198,7 @@ end
 
 function OptimizerPanelClass:ApplyBestTree()
 	if not self.bestResult then return end
+	self.build.spec:AddUndoState()
 	self.optimizer.restoreAlloc(self.build.spec, self.bestResult.bestAlloc)
 	self.build.buildFlag = true
 end
