@@ -113,6 +113,7 @@ function OptimizerPanelClass:PinNode(id, name, nodeType)
 	if #self.pinnedNodesList >= 5 then return end
 	self.pinnedNodes[id] = true
 	t_insert(self.pinnedNodesList, { id = id, name = name, type = nodeType })
+	self:RefreshPinButtons()
 end
 
 function OptimizerPanelClass:UnpinNode(id)
@@ -122,6 +123,23 @@ function OptimizerPanelClass:UnpinNode(id)
 			t_remove(self.pinnedNodesList, i)
 			break
 		end
+	end
+	self:RefreshPinButtons()
+end
+
+function OptimizerPanelClass:RefreshPinButtons()
+	for k in pairs(self.controls) do
+		if k:find("^pinBtn") then
+			self.controls[k] = nil
+		end
+	end
+	for i, pin in ipairs(self.pinnedNodesList) do
+		self.controls["pinBtn" .. pin.id] = new("ButtonControl"):ButtonControl(
+			{ "TOPLEFT", self, "TOPLEFT" }, { 10 + (i - 1) * 150, 78, 140, 16 },
+			"x " .. pin.name,
+			function()
+				self:UnpinNode(pin.id)
+			end)
 	end
 end
 
@@ -141,13 +159,18 @@ end
 
 function OptimizerPanelClass:StartOptimizer()
 	if self.running then return end
-	self.originalAlloc = self.optimizer.snapshotAlloc(self.build.spec)
+	local opt = self:GetOptimizer()
+	if not opt then
+		self.controls.progressLabel.label = "Optimizer module not loaded"
+		return
+	end
+	self.build.spec:AddUndoState()
+	self.originalAlloc = opt.snapshotAlloc(self.build.spec)
 	self.bestResult = nil
 	self.running = true
 	self.progressPct = 0
 	self.controls.progressLabel.label = "Starting..."
-
-	self.optimizerCoroutine = self.optimizer.createOptimizerCoroutine(self.build, {
+	self.optimizerCoroutine = opt.createOptimizerCoroutine(self.build, {
 		alpha = self.alpha,
 		maxIterations = 10000,
 		pointBudget = self.pointBudget,
@@ -180,7 +203,11 @@ function OptimizerPanelClass:ResumeOptimizer()
 	if not ok then
 		self.running = false
 		self.optimizerCoroutine = nil
-		self.controls.progressLabel.label = "Error: " .. tostring(val)
+		if self.originalAlloc then
+			self:GetOptimizer().restoreAlloc(self.build.spec, self.originalAlloc)
+			self.build.buildFlag = true
+		end
+		self.controls.progressLabel.label = "Error: " .. tostring(val) .. " (tree restored)"
 		return
 	end
 
@@ -188,7 +215,13 @@ function OptimizerPanelClass:ResumeOptimizer()
 		self.bestResult = val
 		self.running = false
 		self.optimizerCoroutine = nil
-		self.controls.progressLabel.label = s_format("Done! Best score: %.2f (%d iterations)", val.bestScore, val.iterations)
+		self.controls.progressLabel.label = s_format(
+			"Done! Best score: %.2f (offence x%.2f, defence x%.2f, %d iters, %d evals)",
+			val.bestScore, val.bestOffence or 0, val.bestDefence or 0, val.iterations, val.evalCount or 0)
+		if val.skippedPins and #val.skippedPins > 0 then
+			self.controls.progressLabel.label = self.controls.progressLabel.label
+				.. s_format("  [!%d pin(s) unreachable]", #val.skippedPins)
+		end
 		self:ApplyBestTree()
 	elseif val then
 		self.progressPct = val.progress or 0
@@ -239,13 +272,6 @@ function OptimizerPanelClass:Draw(viewPort)
 	DrawImage(nil, x, y, width, height)
 	SetDrawColor(0.5, 0.5, 0.6, 1)
 	DrawImage(nil, x, y, width, 1)
-
-	-- Draw pinned nodes as text below controls
-	local pinY = y + 78
-	SetDrawColor(1, 1, 1, 1)
-	for i, pin in ipairs(self.pinnedNodesList) do
-		DrawString(x + 10, pinY + (i - 1) * 16, "LEFT", 14, "VAR", pin.name .. " [" .. pin.type .. "]")
-	end
 
 	self:DrawControls(viewPort)
 end
