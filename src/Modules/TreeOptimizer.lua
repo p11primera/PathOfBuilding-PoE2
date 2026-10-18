@@ -99,8 +99,7 @@ function optimizer.getLeafNodes(spec, pinnedNodes)
 	for id, node in pairs(spec.allocNodes) do
 		if node.type ~= "ClassStart"
 			and node.type ~= "AscendClassStart"
-			and node.type ~= "Socket"
-			and not node.containJewelSocket
+			and node.isFreeAllocate == nil   -- granted nodes: removing them makes no budget progress
 			and not pinnedNodes[id]
 			and node.depends
 			and #node.depends == 1      -- only depends on itself
