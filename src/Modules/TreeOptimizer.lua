@@ -355,7 +355,13 @@ function optimizer.initSAState(build, params)
 	state.temp = state.T0
 	state.stagnantCount, state.reheats, state.evalCount = 0, 0, 0
 	if params.seed then m_randomseed(params.seed) end
-	local calcFunc = build.calcsTab:GetMiscCalculator()
+	-- Build a FRESH misc calculator closure instead of taking the memoised
+	-- CalcsTab one (GetMiscCalculator returns the closure from the last UI
+	-- recalc, whose cachedPlayerDB/fullDPSStore carry stale tree state that
+	-- SA's direct spec mutation never invalidates). A cold closure per run
+	-- keeps identical trees scoring identically across runs (determinism).
+	local calcs = require("Modules.Calcs")
+	local calcFunc = calcs.getMiscCalculator(build)
 	state.calcFunc = calcFunc
 	state.calcBase = calcFunc({ }, true)
 	local score, offence, defence = optimizer.calcScore(state.calcBase, state.calcBase, state.alpha, state.weights)

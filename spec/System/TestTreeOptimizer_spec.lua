@@ -516,17 +516,27 @@ describe("TestTreeOptimizer", function()
 	describe("hardening", function()
 		it("scores candidates with an empty override diff (no double-count)", function()
 			local seen = { }
-			build.calcsTab.GetMiscCalculator = function()
+			-- runSA now builds a cold closure via calcs.getMiscCalculator
+			-- (not the memoised CalcsTab one), so spy on the module factory.
+			local Calcs = require("Modules.Calcs")
+			local realFactory = Calcs.getMiscCalculator
+			Calcs.getMiscCalculator = function()
 				return function(override, useFullDPS)
 					table.insert(seen, { override = override, useFullDPS = useFullDPS })
 					return { CombinedDPS = 1000, LifeUnreserved = 3000 }
 				end
 			end
-			local result = build.calcsTab.calcs.optimizer.runSA(build, {
-				maxIterations = 30,
-				pointBudget = 10,
-				seed = 42,
-			})
+			-- Restore the factory BEFORE asserting so a failed assertion
+			-- cannot leave the spy installed for other specs.
+			local ok, result = pcall(function()
+				return build.calcsTab.calcs.optimizer.runSA(build, {
+					maxIterations = 30,
+					pointBudget = 10,
+					seed = 42,
+				})
+			end)
+			Calcs.getMiscCalculator = realFactory
+			assert.is_true(ok, "runSA failed under spy: " .. tostring(result))
 			assert.is_not_nil(result)
 			assert.is_true(#seen > 0, "calcFunc should have been called at least once")
 			for _, call in ipairs(seen) do
