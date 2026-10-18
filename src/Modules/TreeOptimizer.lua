@@ -99,6 +99,8 @@ function optimizer.getLeafNodes(spec, pinnedNodes)
 	for id, node in pairs(spec.allocNodes) do
 		if node.type ~= "ClassStart"
 			and node.type ~= "AscendClassStart"
+			and node.type ~= "Socket"
+			and not node.containJewelSocket
 			and not pinnedNodes[id]
 			and node.depends
 			and #node.depends == 1      -- only depends on itself
@@ -315,11 +317,26 @@ end
 -- Trim excess nodes to fit within point budget.
 -- Removes random leaf nodes until within budget.
 local function trimToBudget(spec, pinnedNodes, budget)
-	while countUsedPoints(spec) > budget do
-		local leaves = optimizer.getLeafNodes(spec, pinnedNodes)
-		if #leaves == 0 then break end
-		local leaf = leaves[m_random(#leaves)]
+	-- Hard cap + zero-progress skipping: deallocating a leaf that
+	-- CountAllocNodes doesn't charge for (granted/free nodes) makes no
+	-- progress; without these guards the UI thread would hang.
+	local skip = { }
+	local guard = 0
+	while countUsedPoints(spec) > budget and guard < 500 do
+		guard = guard + 1
+		local pool = { }
+		for _, leaf in ipairs(optimizer.getLeafNodes(spec, pinnedNodes)) do
+			if not skip[leaf.id] then
+				t_insert(pool, leaf)
+			end
+		end
+		if #pool == 0 then break end
+		local before = countUsedPoints(spec)
+		local leaf = pool[m_random(#pool)]
 		spec:DeallocNode(leaf)
+		if countUsedPoints(spec) == before then
+			skip[leaf.id] = true
+		end
 	end
 end
 
