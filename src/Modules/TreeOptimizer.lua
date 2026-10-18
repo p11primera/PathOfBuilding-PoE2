@@ -160,10 +160,49 @@ function optimizer.restoreAlloc(spec, snapshot)
 	end
 	-- 2. re-allocate the target set. Start nodes go first (they have no path;
 	-- upstream direct-allocates them, see PassiveSpec startNode.alloc = true).
-	-- The rest follow in dependency order: captured snapshot path length gives
-	-- true depth (live pathDist is stale after phase 1's bulk dealloc). When a
-	-- node's path data is missing, a BFS rebuild against the partially restored
-	-- tree exposes paths for the new frontier; each AllocNode also rebuilds.
+	-- Paths MUST stay inside the snapshot set: the live BFS path is unconstrained
+	-- and AllocNode(node, path) silently allocates every path node, which would
+	-- add nodes outside the snapshot (breaking point budgets). The set is
+	-- self-connected (it was allocated as a whole), so a set-internal path
+	-- always exists once its shallower members are restored (ascending-depth order).
+	local targetSet = targetIds
+	local function setPathTo(target)
+		local queue, from, visited = { }, { }, { }
+		local head = 1
+		for id in pairs(spec.allocNodes) do
+			for _, other in ipairs(spec.nodes[id].linked) do
+				if not other.alloc and targetSet[other.id] and not visited[other.id] then
+					visited[other.id] = true
+					from[other.id] = nil
+					t_insert(queue, other)
+				end
+			end
+		end
+		while head <= #queue do
+			local n = queue[head]
+			head = head + 1
+			if n == target then
+				local rev, cur = { }, n
+				while cur do
+					t_insert(rev, cur)
+					cur = from[cur.id]
+				end
+				local path = { }
+				for i = #rev, 1, -1 do
+					t_insert(path, rev[i])
+				end
+				return path
+			end
+			for _, other in ipairs(n.linked) do
+				if not other.alloc and targetSet[other.id] and not visited[other.id] then
+					visited[other.id] = true
+					from[other.id] = n
+					t_insert(queue, other)
+				end
+			end
+		end
+		return nil
+	end
 	local startIds, rest = { }, { }
 	for _, id in ipairs(ids) do
 		local node = spec.nodes[id]
@@ -200,11 +239,12 @@ function optimizer.restoreAlloc(spec, snapshot)
 			else
 				local path = snapshot.path and snapshot.path[id]
 				if not path or #path == 0 then
-					-- Empty/absent capture (allocated nodes carry an EMPTY
-					-- path table); fall through to the live BFS path.
-					path = node.path
+					-- Never trust the live unconstrained BFS path here: it may
+					-- route through nodes outside the snapshot and AllocNode
+					-- would allocate them all, inflating the point count.
+					path = setPathTo(node)
 				end
-				if path and #path > 0 then
+				if path and #path > 0 and node.path then
 					spec:AllocNode(node, path)
 					progressed = true
 				else
