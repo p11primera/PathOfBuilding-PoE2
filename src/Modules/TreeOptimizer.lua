@@ -108,10 +108,17 @@ end
 -- restore: allocMode for weapon-set nodes, mastery selections).
 -- Mastery selections live at spec-level: spec.masterySelections[nodeId] = effectId.
 function optimizer.snapshotAlloc(spec)
-	local snapshot = { nodes = { }, allocMode = { }, mastery = { } }
+	local snapshot = { nodes = { }, allocMode = { }, mastery = { }, path = { } }
 	for id, node in pairs(spec.allocNodes) do
 		snapshot.nodes[id] = true
 		snapshot.allocMode[id] = node.allocMode
+		-- Capture the allocation path while the node is still allocated:
+		-- BuildAllDependsAndPaths only computes node.path for UNALLOCATED
+		-- frontier nodes, so after a re-allocation the field is stale/nil
+		-- and restore could not re-wire the node without this capture.
+		if node.path then
+			snapshot.path[id] = { unpack(node.path) }
+		end
 		if spec.masterySelections[id] then
 			snapshot.mastery[id] = spec.masterySelections[id]
 		end
@@ -156,7 +163,17 @@ function optimizer.restoreAlloc(spec, snapshot)
 				node.alloc = true
 				spec.allocNodes[id] = node
 			else
-				spec:AllocNode(node)
+				local path = (snapshot.path and snapshot.path[id]) or node.path
+				if not path then
+					-- Path was lost to a rebuild; BFS from the partially restored
+					-- tree (ancestors already re-allocated, ascending pathDist) will
+					-- re-establish a path for this frontier node.
+					spec:BuildAllDependsAndPaths()
+					path = node.path
+				end
+				if path then
+					spec:AllocNode(node, path)
+				end
 			end
 		end
 	end
