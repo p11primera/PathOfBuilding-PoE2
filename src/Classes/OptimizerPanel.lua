@@ -93,6 +93,7 @@ function OptimizerPanelClass:OptimizerPanel(anchor, rect, build)
 
 	-- Default budget from build level
 	self:UpdateBudgetFromLevel()
+	return self
 end
 
 function OptimizerPanelClass:GetOptimizer()
