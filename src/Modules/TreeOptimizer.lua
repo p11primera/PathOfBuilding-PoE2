@@ -150,7 +150,14 @@ function optimizer.restoreAlloc(spec, snapshot)
 	for _, id in ipairs(ids) do
 		local node = spec.nodes[id]
 		if node and not node.alloc then
-			spec:AllocNode(node)
+			if node.type == "ClassStart" or node.type == "AscendClassStart" then
+				-- Start nodes have no path (AllocNode early-returns on nil node.path);
+				-- upstream allocates them directly (see PassiveSpec startNode.alloc = true)
+				node.alloc = true
+				spec.allocNodes[id] = node
+			else
+				spec:AllocNode(node)
+			end
 		end
 	end
 	-- 3. restore per-node state that AllocNode does not carry.
