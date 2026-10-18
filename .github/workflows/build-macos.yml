@@ -110,6 +110,24 @@ jobs:
           export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
           busted --lua=luajit
 
+      # JIT verification (trial of luajit port patch 008 / LuaJIT#1520 fix):
+      # run the optimizer specs on the BUNDLED engine with JIT enabled.
+      # Pre-patch, the macOS W^X mcode-allocation storm wedged this for 80+
+      # min. The alarm bounds the run; completion in minutes = fix works.
+      - name: JIT verification — optimizer specs on bundled LuaJIT
+        if: ${{ hashFiles('spec/System/TestTreeOptimizer_spec.lua') != '' }}
+        timeout-minutes: 15
+        run: |
+          SG_LJ=$(find "$GITHUB_WORKSPACE/sg-install" -type f -name luajit | head -1)
+          if [ -z "$SG_LJ" ]; then echo "FATAL: no luajit binary in sg-install artifacts"; exit 1; fi
+          chmod +x "$SG_LJ" 2>/dev/null || true
+          "$SG_LJ" -v
+          eval $(luarocks --lua-version=5.1 path)
+          export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
+          BUSTED=$(command -v busted)
+          perl -e 'alarm 600; exec @ARGV or die "exec failed: $!"' \
+            "$SG_LJ" "$BUSTED" spec/System/TestTreeOptimizer_spec.lua
+
       - name: Package .app bundle
         run: ./package-macos.sh ./sg-install ./dist
 
