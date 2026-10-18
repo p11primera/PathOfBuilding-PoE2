@@ -143,39 +143,66 @@ function optimizer.restoreAlloc(spec, snapshot)
 			spec:DeallocSingleNode(node)
 		end
 	end
-	-- 2. re-allocate the target set, shallow nodes first so paths exist.
-	-- A fully-allocated snapshot contains its own path nodes, so sorting by
-	-- ascending pathDist keeps each node's path allocated before it is reached.
 	local ids = { }
 	for id in pairs(targetIds) do
 		t_insert(ids, id)
 	end
-	table.sort(ids, function(a, b)
-		local na, nb = spec.nodes[a], spec.nodes[b]
-		return (na and na.pathDist or 0) < (nb and nb.pathDist or 0)
-	end)
+	-- 2. re-allocate the target set. Start nodes go first (they have no path;
+	-- upstream direct-allocates them, see PassiveSpec startNode.alloc = true).
+	-- The rest follow in dependency order: captured snapshot path length gives
+	-- true depth (live pathDist is stale after phase 1's bulk dealloc). When a
+	-- node's path data is missing, a BFS rebuild against the partially restored
+	-- tree exposes paths for the new frontier; each AllocNode also rebuilds.
+	local startIds, rest = { }, { }
 	for _, id in ipairs(ids) do
 		local node = spec.nodes[id]
 		if node and not node.alloc then
 			if node.type == "ClassStart" or node.type == "AscendClassStart" then
-				-- Start nodes have no path (AllocNode early-returns on nil node.path);
-				-- upstream allocates them directly (see PassiveSpec startNode.alloc = true)
-				node.alloc = true
-				spec.allocNodes[id] = node
+				t_insert(startIds, id)
+			else
+				t_insert(rest, id)
+			end
+		end
+	end
+	for _, id in ipairs(startIds) do
+		local node = spec.nodes[id]
+		node.alloc = true
+		spec.allocNodes[id] = node
+	end
+	local function restoreDepth(id)
+		local captured = snapshot.path and snapshot.path[id]
+		if captured and #captured > 0 then
+			return #captured
+		end
+		local node = spec.nodes[id]
+		return node and node.pathDist or 0
+	end
+	table.sort(rest, function(a, b) return restoreDepth(a) < restoreDepth(b) end)
+	local pending = rest
+	local stallBudget = #rest + 1
+	while #pending > 0 and stallBudget > 0 do
+		local stillPending, progressed = { }, false
+		for _, id in ipairs(pending) do
+			local node = spec.nodes[id]
+			if not node or node.alloc then
+				progressed = true
 			else
 				local path = (snapshot.path and snapshot.path[id]) or node.path
-				if not path then
-					-- Path was lost to a rebuild; BFS from the partially restored
-					-- tree (ancestors already re-allocated, ascending pathDist) will
-					-- re-establish a path for this frontier node.
-					spec:BuildAllDependsAndPaths()
-					path = node.path
-				end
-				if path then
+				if path and #path > 0 then
 					spec:AllocNode(node, path)
+					progressed = true
+				else
+					t_insert(stillPending, id)
 				end
 			end
 		end
+		if not progressed then
+			-- No node could advance: rebuild BFS state against what is
+			-- restored so far, which will expose paths for the next frontier.
+			spec:BuildAllDependsAndPaths()
+			stallBudget = stallBudget - 1
+		end
+		pending = stillPending
 	end
 	-- 3. restore per-node state that AllocNode does not carry.
 	if snapshot.allocMode then
