@@ -388,9 +388,20 @@ end
 -- calcFunc overrides are applied ON TOP of the live spec, so passing the
 -- already-allocated set would double-count notable/mastery modifiers).
 -- useFullDPS = true matches the design doc (sustained DPS).
-local function evaluateAlloc(calcFunc, spec)
-	return calcFunc({ }, true)
+local function evaluateAlloc(calcFunc, spec, fastOptions)
+	return calcFunc({ }, true, fastOptions)
 end
+
+-- Hot-loop accelerate flags: during an SA run only the passive tree changes
+-- (items, gems, config are frozen), so only the nodeAlloc-derived state
+-- needs rebuilding per evaluation. Reusing the environment (the upstream
+-- accelerated path, same one the gem dropdown sorting uses) eliminates the
+-- per-eval allocation storm that pushed headless CI into GC collapse.
+local SA_FAST_OPTIONS = {
+	requirementsItems = true,
+	requirementsGems = true,
+	skills = true,
+}
 
 local SA_DEFAULTS = {
 	initialTemp = 1.0,
@@ -432,7 +443,8 @@ function optimizer.initSAState(build, params)
 	local calcs = require("Modules.Calcs")
 	local calcFunc = calcs.getMiscCalculator(build)
 	state.calcFunc = calcFunc
-	state.calcBase = calcFunc({ }, true)
+	state.fastOptions = SA_FAST_OPTIONS
+	state.calcBase = calcFunc({ }, true, SA_FAST_OPTIONS)
 	local score, offence, defence = optimizer.calcScore(state.calcBase, state.calcBase, state.alpha, state.weights)
 	state.currentAlloc = optimizer.snapshotAlloc(state.spec)
 	state.currentScore = score
@@ -450,7 +462,7 @@ function optimizer.saStep(state)
 	local mutated = optimizer.mutate(spec, state.pinned)
 	if mutated then
 		trimToBudget(spec, state.pinned, state.budget)
-		local output = evaluateAlloc(state.calcFunc, spec)
+		local output = evaluateAlloc(state.calcFunc, spec, state.fastOptions)
 		state.evalCount = state.evalCount + 1
 		local newScore, offence, defence = optimizer.calcScore(output, state.calcBase, state.alpha, state.weights)
 		local prob = optimizer.acceptanceProbability(state.currentScore, newScore, state.temp)
