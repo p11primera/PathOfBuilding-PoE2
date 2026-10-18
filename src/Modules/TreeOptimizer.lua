@@ -148,9 +148,14 @@ function optimizer.restoreAlloc(spec, snapshot)
 	for id in pairs(spec.allocNodes) do
 		t_insert(toClear, id)
 	end
+	-- Keep object references: if the caller's snapshot references were taken
+	-- on a stale node set, ids may name nodes that are no longer in
+	-- spec.nodes; the object refs make phase 2 robust to that.
+	snapshot._refs = snapshot._refs or { }
 	for _, id in ipairs(toClear) do
 		local node = spec.nodes[id]
 		if node then
+			snapshot._refs[id] = node
 			spec:DeallocSingleNode(node)
 		end
 	end
@@ -215,16 +220,18 @@ function optimizer.restoreAlloc(spec, snapshot)
 		end
 	end
 	for _, id in ipairs(startIds) do
-		local node = spec.nodes[id]
-		node.alloc = true
-		spec.allocNodes[id] = node
+		local node = (snapshot._refs and snapshot._refs[id]) or spec.nodes[id]
+		if node then
+			node.alloc = true
+			spec.allocNodes[id] = node
+		end
 	end
 	local function restoreDepth(id)
 		local captured = snapshot.path and snapshot.path[id]
 		if captured and #captured > 0 then
 			return #captured
 		end
-		local node = spec.nodes[id]
+		local node = (snapshot._refs and snapshot._refs[id]) or spec.nodes[id]
 		return node and node.pathDist or 0
 	end
 	table.sort(rest, function(a, b) return restoreDepth(a) < restoreDepth(b) end)
@@ -233,7 +240,7 @@ function optimizer.restoreAlloc(spec, snapshot)
 	while #pending > 0 and stallBudget > 0 do
 		local stillPending, progressed = { }, false
 		for _, id in ipairs(pending) do
-			local node = spec.nodes[id]
+			local node = (snapshot._refs and snapshot._refs[id]) or spec.nodes[id]
 			if not node or node.alloc then
 				progressed = true
 			else

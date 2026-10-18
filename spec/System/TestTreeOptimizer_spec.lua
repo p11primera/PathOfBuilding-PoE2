@@ -5,6 +5,7 @@ describe("TestTreeOptimizer", function()
 
 	describe("scoring", function()
 		it("returns pure offence score when alpha is 1.0", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'returns pure offence score when alpha is 1.0', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local output = {
 				CombinedDPS = 10000,
@@ -30,6 +31,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("returns pure defence score when alpha is 0.0", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'returns pure defence score when alpha is 0.0', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local output = {
 				CombinedDPS = 5000,
@@ -56,6 +58,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("blends offence and defence at alpha 0.5", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'blends offence and defence at alpha 0.5', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local output = {
 				CombinedDPS = 10000,
@@ -84,6 +87,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("uses custom weights when provided", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'uses custom weights when provided', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local output = {
 				CombinedDPS = 5000,
@@ -110,6 +114,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("handles zero base DPS gracefully", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'handles zero base DPS gracefully', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local output = {
 				CombinedDPS = 0,
@@ -138,6 +143,7 @@ describe("TestTreeOptimizer", function()
 
 	describe("connectivity helpers", function()
 		it("finds leaf nodes that can be removed without disconnecting tree", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'finds leaf nodes that can be removed without disconnecting tree', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = build.spec
 
@@ -162,6 +168,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("finds reachable unallocated nodes", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'finds reachable unallocated nodes', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = build.spec
 
@@ -180,6 +187,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("respects pinned nodes in leaf detection", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'respects pinned nodes in leaf detection', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = build.spec
 
@@ -232,6 +240,7 @@ describe("TestTreeOptimizer", function()
 		end
 
 		it("mutateAdd increases node count by path length", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'mutateAdd increases node count by path length', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = setupTree(3)
 			local before = countAllocNodes(spec)
@@ -243,6 +252,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("mutateRemove decreases node count", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'mutateRemove decreases node count', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = setupTree(5)
 			local before = countAllocNodes(spec)
@@ -254,6 +264,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("mutateRemove never removes pinned nodes", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'mutateRemove never removes pinned nodes', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = setupTree(5)
 
@@ -270,6 +281,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("mutateSwap keeps roughly same node count", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'mutateSwap keeps roughly same node count', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = setupTree(5)
 			local ok = optimizer.mutateSwap(spec, {})
@@ -282,6 +294,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("mutate applies a random mutation successfully", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'mutate applies a random mutation successfully', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = setupTree(5)
 			local successes = 0
@@ -299,12 +312,14 @@ describe("TestTreeOptimizer", function()
 
 	describe("SA core", function()
 		it("acceptance probability is 1.0 for improvements", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'acceptance probability is 1.0 for improvements', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local prob = optimizer.acceptanceProbability(1.0, 2.0, 1.0)
 			assert.are.equals(1.0, prob)
 		end)
 
 		it("acceptance probability decreases with temperature", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'acceptance probability decreases with temperature', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local probHot = optimizer.acceptanceProbability(2.0, 1.0, 1.0)
 			local probCold = optimizer.acceptanceProbability(2.0, 1.0, 0.01)
@@ -312,12 +327,14 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("acceptance probability is between 0 and 1 for worse moves", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'acceptance probability is between 0 and 1 for worse moves', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local prob = optimizer.acceptanceProbability(2.0, 1.0, 0.5)
 			assert.is_true(prob > 0 and prob < 1)
 		end)
 
 		it("runSA improves score over iterations on a real build", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'runSA improves score over iterations on a real build', os.clock()))
 			local spec = build.spec
 			spec:BuildAllDependsAndPaths()
 			local optimizer = build.calcsTab.calcs.optimizer
@@ -338,6 +355,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("enforces point budget", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'enforces point budget', os.clock()))
 			local spec = build.spec
 			spec:BuildAllDependsAndPaths()
 			local optimizer = build.calcsTab.calcs.optimizer
@@ -360,6 +378,7 @@ describe("TestTreeOptimizer", function()
 
 	describe("pinned nodes", function()
 		it("findNodeByName returns empty for empty query", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'findNodeByName returns empty for empty query', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local results = optimizer.findNodesByName(build.spec, "")
 			assert.is_true(type(results) == "table")
@@ -367,6 +386,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("ensurePinnedAllocated allocates pinned nodes and paths", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'ensurePinnedAllocated allocates pinned nodes and paths', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = build.spec
 			spec:BuildAllDependsAndPaths()
@@ -391,6 +411,7 @@ describe("TestTreeOptimizer", function()
 
 	describe("coroutine runner", function()
 		it("createOptimizerCoroutine returns a resumable coroutine", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'createOptimizerCoroutine returns a resumable coroutine', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local spec = build.spec
 			spec:BuildAllDependsAndPaths()
@@ -421,6 +442,7 @@ describe("TestTreeOptimizer", function()
 
 	describe("integration", function()
 		it("full optimization cycle improves DPS on a fresh build", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'full optimization cycle improves DPS on a fresh build', os.clock()))
 			newBuild()
 			local spec = build.spec
 			local optimizer = build.calcsTab.calcs.optimizer
@@ -456,6 +478,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("undo restores original tree", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'undo restores original tree', os.clock()))
 			newBuild()
 			local spec = build.spec
 			local optimizer = build.calcsTab.calcs.optimizer
@@ -483,6 +506,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("respects pinned nodes in optimization", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'respects pinned nodes in optimization', os.clock()))
 			newBuild()
 			local spec = build.spec
 			local optimizer = build.calcsTab.calcs.optimizer
@@ -515,6 +539,7 @@ describe("TestTreeOptimizer", function()
 
 	describe("hardening", function()
 		it("scores candidates with an empty override diff (no double-count)", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'scores candidates with an empty override diff (no double-count)', os.clock()))
 			local seen = { }
 			-- runSA now builds a cold closure via calcs.getMiscCalculator
 			-- (not the memoised CalcsTab one), so spy on the module factory.
@@ -547,6 +572,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("deterministic results with a fixed seed", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'deterministic results with a fixed seed', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local startSnap = optimizer.snapshotAlloc(build.spec)
 			local r1 = optimizer.runSA(build, {
@@ -564,6 +590,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("allocates pinned nodes in the synchronous runSA path", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'allocates pinned nodes in the synchronous runSA path', os.clock()))
 			local spec = build.spec
 			local optimizer = build.calcsTab.calcs.optimizer
 			spec:BuildAllDependsAndPaths()
@@ -588,6 +615,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("respects budget using game accounting", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'respects budget using game accounting', os.clock()))
 			local optimizer = build.calcsTab.calcs.optimizer
 			local result = optimizer.runSA(build, {
 				maxIterations = 40,
@@ -601,6 +629,7 @@ describe("TestTreeOptimizer", function()
 		end)
 
 		it("restoreAlloc round-trips through the PassiveSpec API", function()
+			print(string.format("OPTDBG2 entering %s t=%.3f", 'restoreAlloc round-trips through the PassiveSpec API', os.clock()))
 			local spec = build.spec
 			local optimizer = build.calcsTab.calcs.optimizer
 			spec:BuildAllDependsAndPaths()
