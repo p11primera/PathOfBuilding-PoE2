@@ -391,20 +391,33 @@ describe("TestTreeOptimizer", function()
 			local spec = build.spec
 			spec:BuildAllDependsAndPaths()
 
-			-- Find a reachable Normal node within 3 hops
-			local targetNode = nil
+			-- Find a reachable Normal node within 3 hops. Collect + sort by
+			-- id: a raw pairs() scan makes the picked node depend on LuaJIT
+			-- table layout luck, so CI builds diverged on which node (and
+			-- which code path) this test exercised.
+			local candidates = { }
 			for id, node in pairs(spec.nodes) do
 				if not node.alloc and node.path and #node.path > 0
 					and node.type == "Normal" and node.pathDist and node.pathDist <= 3 then
-					targetNode = node
-					break
+					table.insert(candidates, node)
 				end
 			end
+			table.sort(candidates, function(a, b) return a.id < b.id end)
+			local targetNode = candidates[1]
 
 			if targetNode then
 				local pinned = { [targetNode.id] = true }
 				optimizer.ensurePinnedAllocated(spec, pinned)
-				assert.is_true(targetNode.alloc)
+				-- Self-contained failure message: never let busted build an
+				-- error traceback through this 40k-node closure environment
+				-- (traceback materialisation OOM-killed the CI runner once).
+				if not targetNode.alloc then
+					error(string.format(
+						"ensurePinnedAllocated failed: target=%s pathLen=%s skippedCount=%s",
+						tostring(targetNode.id),
+						tostring(targetNode.path and #targetNode.path or -1),
+						tostring(#{ })), 0)
+				end
 			end
 		end)
 	end)

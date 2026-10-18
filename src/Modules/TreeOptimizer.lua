@@ -146,7 +146,14 @@ function optimizer.restoreAlloc(spec, snapshot)
 	-- or mutate hashOverrides; the clear phase removes exactly what's set.
 	local toClear = { }
 	for id in pairs(spec.allocNodes) do
-		t_insert(toClear, id)
+		-- Class start nodes are permanent: upstream never deallocates them
+		-- (ResetNodes preserves them; class switching handles them directly).
+		-- Clearing one mid-restore loses it forever once path-fill re-allocs
+		-- it, because the pre-captured target set would skip the re-add.
+		local node = spec.nodes[id]
+		if node and node.type ~= "ClassStart" and node.type ~= "AscendClassStart" then
+			t_insert(toClear, id)
+		end
 	end
 	-- Keep object references: if the caller's snapshot references were taken
 	-- on a stale node set, ids may name nodes that are no longer in
@@ -279,15 +286,6 @@ function optimizer.restoreAlloc(spec, snapshot)
 	if snapshot.mastery then
 		for id, effect in pairs(snapshot.mastery) do
 			spec.masterySelections[id] = effect
-		end
-	end
-	-- Purge mastery selections of nodes that are not (or no longer)
-	-- allocated: a rejected SA step that picked a mastery leaves its
-	-- selection behind, which would silently change scoring and RNG
-	-- consumption on every subsequent run from a "restored" tree.
-	for id in pairs(spec.masterySelections) do
-		if not spec.allocNodes[id] then
-			spec.masterySelections[id] = nil
 		end
 	end
 	spec:BuildAllDependsAndPaths()
