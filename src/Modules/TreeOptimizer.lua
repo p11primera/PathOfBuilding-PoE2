@@ -113,10 +113,12 @@ function optimizer.snapshotAlloc(spec)
 		snapshot.nodes[id] = true
 		snapshot.allocMode[id] = node.allocMode
 		-- Capture the allocation path while the node is still allocated:
-		-- BuildAllDependsAndPaths only computes node.path for UNALLOCATED
-		-- frontier nodes, so after a re-allocation the field is stale/nil
-		-- and restore could not re-wire the node without this capture.
-		if node.path then
+		-- BuildAllDependsAndPaths only computes real paths for UNALLOCATED
+		-- frontier nodes (an allocated node's path is an EMPTY table), so
+		-- after a re-allocation the field is useless without this capture.
+		-- Only capture non-empty paths: an empty table would shadow the
+		-- BFS-recomputed path during restore.
+		if node.path and #node.path > 0 then
 			snapshot.path[id] = { unpack(node.path) }
 		end
 		if spec.masterySelections[id] then
@@ -187,7 +189,12 @@ function optimizer.restoreAlloc(spec, snapshot)
 			if not node or node.alloc then
 				progressed = true
 			else
-				local path = (snapshot.path and snapshot.path[id]) or node.path
+				local path = snapshot.path and snapshot.path[id]
+				if not path or #path == 0 then
+					-- Empty/absent capture (allocated nodes carry an EMPTY
+					-- path table); fall through to the live BFS path.
+					path = node.path
+				end
 				if path and #path > 0 then
 					spec:AllocNode(node, path)
 					progressed = true
