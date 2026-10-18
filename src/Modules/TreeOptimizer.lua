@@ -291,7 +291,7 @@ function optimizer.initSAState(build, params)
 	local calcFunc = build.calcsTab:GetMiscCalculator()
 	state.calcFunc = calcFunc
 	state.calcBase = calcFunc({ }, true)
-	local score, offence, defence = optimizer.calcScore(calcBase, calcBase, state.alpha, state.weights)
+	local score, offence, defence = optimizer.calcScore(state.calcBase, state.calcBase, state.alpha, state.weights)
 	state.currentAlloc = optimizer.snapshotAlloc(state.spec)
 	state.currentScore = score
 	state.bestAlloc = optimizer.snapshotAlloc(state.spec)
