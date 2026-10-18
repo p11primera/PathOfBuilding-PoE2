@@ -1,4 +1,4 @@
-describe("TestTreeOptimizer", { tags = "optimizer" }, function()
+describe("TestTreeOptimizer", function()
 	before_each(function()
 		newBuild()
 	end)

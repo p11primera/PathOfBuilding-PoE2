@@ -2,7 +2,7 @@
 -- + OptimizerPanel via newBuild(); the original three startup crashes
 -- (legacy new() ctor args, calcsTab-before-init ordering, nil self.build)
 -- all surface here.
-describe("TestOptimizerUI", { tags = "optimizer" }, function()
+describe("TestOptimizerUI", function()
 	before_each(function()
 		newBuild()
 	end)

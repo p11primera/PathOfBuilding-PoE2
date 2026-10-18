@@ -96,8 +96,8 @@ jobs:
           luarocks --lua-version=5.1 install luacov-coveralls
 
       - name: Run tests
-        # LUAJIT_NO_JIT=1: see JIT notes below. Optimizer specs run
-        # separately (tag=optimizer) so a hang there is attributable.
+        # LUAJIT_NO_JIT=1; optimizer specs run in dedicated steps below
+        # (file-scoped, not tag-scoped — busted 2.3 rejects describe(name,{tags}) ).
         timeout-minutes: 30
         env:
           LUAJIT_NO_JIT: "1"
@@ -106,13 +106,13 @@ jobs:
           # Prepend sg-install paths so busted can find lua-utf8.so / lcurl.so etc.
           # On macOS, SHARED library targets install to Frameworks/; also check root.
           export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
-          busted --lua=luajit --exclude-tags=builds --exclude-tags=optimizer
+          OPT="spec/System/TestTreeOptimizer_spec.lua spec/System/TestOptimizerUI_spec.lua"
+          ALL=$(find spec -name '*_spec.lua' ! -name TestTreeOptimizer_spec.lua ! -name TestOptimizerUI_spec.lua)
+          timeout -k 15 1500 busted --lua=luajit $ALL
 
-      # Isolation probe (LuaJIT#1520 trial): the full suite stalled at ~27min
-      # in run 39164074889 exactly where the optimizer specs run, *with*
-      # NO_JIT set. Run them standalone to pin the culprit:
-      # hang here (interpreter mode) => patched sg-install C libs changed
-      # behaviour; pass here + hang in JIT verification => #1520 not fixed.
+      # Isolation probe (LuaJIT#1520 trial): full suite stalled ~27min at the
+      # optimizer specs WITH NO_JIT (run 39164074889). Standalone interpreter
+      # run pins the cause: hang here => patched sg-install regression.
       - name: Optimizer specs (interpreter mode, bundled C libs)
         timeout-minutes: 20
         env:
@@ -120,7 +120,7 @@ jobs:
         run: |
           eval $(luarocks --lua-version=5.1 path)
           export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
-          timeout -k 15 900 busted --lua=luajit --tags=optimizer || {
+          timeout -k 15 900 busted --lua=luajit spec/System/TestTreeOptimizer_spec.lua spec/System/TestOptimizerUI_spec.lua || {
             rc=$?
             [ "$rc" = 124 ] && echo "::error::Optimizer specs hung in INTERPRETER mode — patch regression, not #1520"
             exit "$rc"
@@ -141,7 +141,7 @@ jobs:
           export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
           BUSTED=$(command -v busted)
           perl -e 'alarm 600; exec @ARGV or die "exec failed: $!"' \
-            "$SG_LJ" "$BUSTED" --tags=optimizer
+            "$SG_LJ" "$BUSTED" spec/System/TestTreeOptimizer_spec.lua spec/System/TestOptimizerUI_spec.lua
 
       - name: Package .app bundle
         run: ./package-macos.sh ./sg-install ./dist
