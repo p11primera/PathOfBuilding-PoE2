@@ -108,7 +108,7 @@ jobs:
           export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
           OPT="spec/System/TestTreeOptimizer_spec.lua spec/System/TestOptimizerUI_spec.lua"
           ALL=$(find spec -name '*_spec.lua' ! -name TestTreeOptimizer_spec.lua ! -name TestOptimizerUI_spec.lua)
-          timeout -k 15 1500 busted --lua=luajit $ALL
+          perl -e 'alarm 1500; exec @ARGV or die "exec failed: $!"' busted --lua=luajit $ALL
 
       # Isolation probe (LuaJIT#1520 trial): full suite stalled ~27min at the
       # optimizer specs WITH NO_JIT (run 39164074889). Standalone interpreter
@@ -120,11 +120,8 @@ jobs:
         run: |
           eval $(luarocks --lua-version=5.1 path)
           export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
-          timeout -k 15 900 busted --lua=luajit spec/System/TestTreeOptimizer_spec.lua spec/System/TestOptimizerUI_spec.lua || {
-            rc=$?
-            [ "$rc" = 124 ] && echo "::error::Optimizer specs hung in INTERPRETER mode — patch regression, not #1520"
-            exit "$rc"
-          }
+          perl -e 'alarm 900; exec @ARGV or die "exec failed: $!"' busted --lua=luajit spec/System/TestTreeOptimizer_spec.lua spec/System/TestOptimizerUI_spec.lua
+          # (non-zero exit here with no summary = timeout/alarm kill)
 
       # JIT verification (trial of luajit port patch 008 / LuaJIT#1520 fix):
       # run the optimizer specs on the BUNDLED engine with JIT enabled.
