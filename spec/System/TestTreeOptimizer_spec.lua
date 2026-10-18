@@ -538,18 +538,40 @@ describe("TestTreeOptimizer", function()
 
 		it("deterministic results with a fixed seed", function()
 			local optimizer = build.calcsTab.calcs.optimizer
+			local dbgSpec = build.spec
+			local function dumpTree(label)
+				local ids = { }
+				for id in pairs(dbgSpec.allocNodes) do table.insert(ids, id) end
+				table.sort(ids)
+				local rids = { }
+				for _, n in ipairs(optimizer.getReachableNodes(dbgSpec)) do table.insert(rids, n.id) end
+				table.sort(rids)
+				print(string.format("OPTDBG %s tree=[%s] reachable#=%d reach_head=[%s]",
+					label, table.concat(ids, ","), #rids, table.concat(rids, ",", 1, math.min(6, #rids))))
+			end
+			local function dumpResult(label, res)
+				local ids = { }
+				for id in pairs(res.bestAlloc.nodes) do table.insert(ids, id) end
+				table.sort(ids)
+				print(string.format("OPTDBG %s score=%s iter=%d eval=%d best=[%s]",
+					label, tostring(res.bestScore), res.iterations, res.evalCount, table.concat(ids, ",")))
+			end
+			dumpTree("pre-r1")
 			local startSnap = optimizer.snapshotAlloc(build.spec)
 			local r1 = optimizer.runSA(build, {
 				maxIterations = 50,
 				pointBudget = 12,
 				seed = 7,
 			})
+			dumpResult("r1", r1)
 			optimizer.restoreAlloc(build.spec, startSnap)
+			dumpTree("pre-r2")
 			local r2 = optimizer.runSA(build, {
 				maxIterations = 50,
 				pointBudget = 12,
 				seed = 7,
 			})
+			dumpResult("r2", r2)
 			assert.are.equal(r1.bestScore, r2.bestScore)
 		end)
 

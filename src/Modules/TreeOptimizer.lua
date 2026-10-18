@@ -225,6 +225,15 @@ function optimizer.restoreAlloc(spec, snapshot)
 			spec.masterySelections[id] = effect
 		end
 	end
+	-- Purge mastery selections of nodes that are not (or no longer)
+	-- allocated: a rejected SA step that picked a mastery leaves its
+	-- selection behind, which would silently change scoring and RNG
+	-- consumption on every subsequent run from a "restored" tree.
+	for id in pairs(spec.masterySelections) do
+		if not spec.allocNodes[id] then
+			spec.masterySelections[id] = nil
+		end
+	end
 	spec:BuildAllDependsAndPaths()
 end
 
