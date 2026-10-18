@@ -83,6 +83,11 @@ function optimizer.getReachableNodes(spec)
 			t_insert(reachable, node)
 		end
 	end
+	-- pairs() order over integer-keyed hash-part tables depends on the
+	-- table's insert/remove history, so random indices drawn into this
+	-- array would not reproduce across runs that reached the same node
+	-- set via different churn. Sort: order becomes a pure function of the set.
+	table.sort(reachable, function(a, b) return a.id < b.id end)
 	return reachable
 end
 
@@ -101,6 +106,9 @@ function optimizer.getLeafNodes(spec, pinnedNodes)
 			t_insert(leaves, node)
 		end
 	end
+	-- see getReachableNodes: pairs() order on churned tables is history-
+	-- dependent; sort so random leaf selection is reproducible.
+	table.sort(leaves, function(a, b) return a.id < b.id end)
 	return leaves
 end
 
