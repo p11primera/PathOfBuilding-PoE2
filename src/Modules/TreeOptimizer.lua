@@ -11,6 +11,31 @@ local m_randomseed = math.randomseed
 local t_insert = table.insert
 local t_remove = table.remove
 
+-- macOS ARM64: the LuaJIT ARM64 trace compiler wedges on the SA hot loop
+-- (mcode allocation storm: W^X refuses exec pages near the interpreter,
+-- LuaJIT #285/#1446/#1520 family; observed as an 80+ min hang on Apple
+-- Silicon). Run the optimizer hot loop in the interpreter there and
+-- restore the JIT afterwards. CI proves interpreter mode completes the
+-- full spec suite (997/997 in ~110s); the trace compiler stays enabled
+-- for everything else.
+local MAC_ARM64 = false
+if jit and jit.os == "OSX" and jit.arch == "arm64" then
+	MAC_ARM64 = true
+end
+
+local function runWithoutJIT(fn, ...)
+	if not MAC_ARM64 then
+		return fn(...)
+	end
+	jit.off()
+	local ok, res = pcall(fn, ...)
+	jit.on()
+	if not ok then
+		error(res, 0)
+	end
+	return res
+end
+
 local optimizer = { }
 
 -- Default defence stat weights
@@ -511,7 +536,7 @@ end
 -- Run Simulated Annealing optimization (synchronous, blocking).
 -- params: { alpha, maxIterations, pointBudget, pinnedNodes, customWeights }
 -- Returns: { bestAlloc, bestScore, iterations }
-function optimizer.runSA(build, params)
+function optimizer.runSAInner(build, params)
 	local state = optimizer.initSAState(build, params)
 	for iter = 1, state.maxIter do
 		if optimizer.saStep(state) == "earlystop" then
@@ -521,6 +546,11 @@ function optimizer.runSA(build, params)
 	end
 	optimizer.restoreAlloc(state.spec, state.bestAlloc)
 	return optimizer.saResult(state, state.maxIter)
+end
+
+-- Public entry: JIT-guarded wrapper (macOS ARM64, see runWithoutJIT).
+function optimizer.runSA(build, params)
+	return runWithoutJIT(optimizer.runSAInner, build, params)
 end
 
 -- Search for nodes by name (case-insensitive substring match).
@@ -567,7 +597,7 @@ end
 -- Returns a coroutine. Resume it each frame. When dead, the return value is the final result.
 -- While running, yields { progress, iteration, bestScore } tables for progress updates.
 function optimizer.createOptimizerCoroutine(build, params)
-	return coroutine.create(function()
+	local function saCoroutineBody()
 		local state = optimizer.initSAState(build, params)
 		local start = GetTime and GetTime() or os.clock() * 1000
 		for iter = 1, state.maxIter do
@@ -588,6 +618,33 @@ function optimizer.createOptimizerCoroutine(build, params)
 		end
 		optimizer.restoreAlloc(state.spec, state.bestAlloc)
 		return optimizer.saResult(state, state.maxIter)
+	end
+	if not MAC_ARM64 then
+		return coroutine.create(saCoroutineBody)
+	end
+	-- macOS ARM64: keep the trace compiler off for the SA loop's lifetime
+	-- (across yields — the panel resumes this every frame). Relay through an
+	-- inner coroutine: LuaJIT 5.1 cannot yield across pcall's C boundary, so
+	-- error handling rides on coroutine.resume's ok/err instead.
+	return coroutine.create(function()
+		jit.off()
+		local inner = coroutine.create(saCoroutineBody)
+		while true do
+			local ok, val = coroutine.resume(inner)
+			if coroutine.status(inner) == "suspended" then
+				if not ok then
+					jit.on()
+					error(val, 0)
+				end
+				coroutine.yield(val)  -- progress table → panel
+			else
+				jit.on()
+				if not ok then
+					error(val, 0)
+				end
+				return val            -- final saResult
+			end
+		end
 	end)
 end
 

@@ -96,8 +96,12 @@ jobs:
           luarocks --lua-version=5.1 install luacov-coveralls
 
       - name: Run tests
-        # LUAJIT_NO_JIT=1; optimizer specs run in dedicated steps below
-        # (file-scoped, not tag-scoped — busted 2.3 rejects describe(name,{tags}) ).
+        # LUAJIT_NO_JIT=1: the macOS ARM64 LuaJIT trace compiler wedges on the
+        # optimizer SA hot loop (mcode allocation storm, LuaJIT #285/#1446/#1520
+        # family). Interpreter mode passes 997/997 in ~110s. Production JIT for
+        # the optimizer is handled app-side: TreeOptimizer runs its SA loop with
+        # jit.off() on macOS ARM64 (runWithoutJIT / coroutine relay).
+        # TAP output is unsuitable here: its handler exits 1 despite 0 failures.
         timeout-minutes: 30
         env:
           LUAJIT_NO_JIT: "1"
@@ -106,39 +110,7 @@ jobs:
           # Prepend sg-install paths so busted can find lua-utf8.so / lcurl.so etc.
           # On macOS, SHARED library targets install to Frameworks/; also check root.
           export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
-          OPT="spec/System/TestTreeOptimizer_spec.lua spec/System/TestOptimizerUI_spec.lua"
-          ALL=$(find spec/System -name '*_spec.lua' ! -name TestTreeOptimizer_spec.lua ! -name TestOptimizerUI_spec.lua | sort | sed 's|^|../|')
-          perl -e 'alarm 1500; exec @ARGV or die "exec failed: $!"' busted --lua=luajit $ALL
-
-      # Isolation probe (LuaJIT#1520 trial): full suite stalled ~27min at the
-      # optimizer specs WITH NO_JIT (run 39164074889). Standalone interpreter
-      # run pins the cause: hang here => patched sg-install regression.
-      - name: Optimizer specs (interpreter mode, bundled C libs)
-        timeout-minutes: 20
-        env:
-          LUAJIT_NO_JIT: "1"
-        run: |
-          eval $(luarocks --lua-version=5.1 path)
-          export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
-          perl -e 'alarm 900; exec @ARGV or die "exec failed: $!"' busted --lua=luajit ../spec/System/TestTreeOptimizer_spec.lua ../spec/System/TestOptimizerUI_spec.lua
-          # (non-zero exit here with no summary = timeout/alarm kill)
-
-      # JIT verification (trial of luajit port patch 008 / LuaJIT#1520 fix):
-      # run the optimizer specs on the BUNDLED engine with JIT enabled.
-      # Pre-patch, the macOS W^X mcode-allocation storm wedged this for 80+
-      # min. The alarm bounds the run; completion in minutes = fix works.
-      - name: JIT verification — optimizer specs on bundled LuaJIT
-        timeout-minutes: 15
-        run: |
-          SG_LJ=$(find "$GITHUB_WORKSPACE/sg-install" -type f -name luajit | head -1)
-          if [ -z "$SG_LJ" ]; then echo "FATAL: no luajit binary in sg-install artifacts"; exit 1; fi
-          chmod +x "$SG_LJ" 2>/dev/null || true
-          "$SG_LJ" -v
-          eval $(luarocks --lua-version=5.1 path)
-          export LUA_CPATH="$GITHUB_WORKSPACE/sg-install/Frameworks/?.so;$GITHUB_WORKSPACE/sg-install/?.so;$LUA_CPATH"
-          BUSTED=$(command -v busted)
-          perl -e 'alarm 600; exec @ARGV or die "exec failed: $!"' \
-            "$SG_LJ" "$BUSTED" ../spec/System/TestTreeOptimizer_spec.lua ../spec/System/TestOptimizerUI_spec.lua
+          busted --lua=luajit
 
       - name: Package .app bundle
         run: ./package-macos.sh ./sg-install ./dist
