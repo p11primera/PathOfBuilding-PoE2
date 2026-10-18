@@ -13,8 +13,8 @@ local s_format = string.format
 local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost")
 
 function OptimizerPanelClass:OptimizerPanel(anchor, rect, build)
-	self.Control(anchor, rect)
-	self.ControlHost()
+	self:Control(anchor, rect)
+	self:ControlHost()
 	self.build = build
 	self.pinnedNodes = { }           -- { [nodeId] = true }
 	self.pinnedNodesList = { }       -- array of { id, name, type } for display
