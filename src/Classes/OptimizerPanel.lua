@@ -10,7 +10,9 @@ local m_floor = math.floor
 local m_max = math.max
 local s_format = string.format
 
-local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost", function(self, anchor, rect, build)
+local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost")
+
+function OptimizerPanelClass:OptimizerPanel(anchor, rect, build)
 	self.Control(anchor, rect)
 	self.ControlHost()
 	self.build = build
@@ -91,7 +93,7 @@ local OptimizerPanelClass = newClass("OptimizerPanel", "Control", "ControlHost",
 
 	-- Default budget from build level
 	self:UpdateBudgetFromLevel()
-end)
+end
 
 function OptimizerPanelClass:GetOptimizer()
 	if not self.optimizer then
