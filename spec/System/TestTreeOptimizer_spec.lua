@@ -613,6 +613,27 @@ describe("TestTreeOptimizer", function()
 			do
 				local calcFunc = Calcs.getMiscCalculator(build)
 				local baseOutput = calcFunc({ }, true, FAST)
+				-- [DIAG-TEMP] one-shot ground truth for the CI failure
+				do
+					local o = calcFunc({ }, true, FAST)
+					local cand = optimizer.getReachableNodes(spec)
+					local gDPS = (o.FullDPS and o.FullDPS > 0 and o.FullDPS) or o.CombinedDPS or 0
+					print(string.format("[DIAG] reachable=%d allocCount=%s FullDPS=%s CombinedDPS=%s TotalDPS=%s getDPS=%s",
+						#cand, tostring(spec:CountAllocNodes()),
+						tostring(o.FullDPS), tostring(o.CombinedDPS), tostring(o.TotalDPS), tostring(gDPS)))
+					local shown = 0
+					for _, node in ipairs(cand) do
+						spec:AllocNode(node)
+						if spec.allocNodes[node.id] and shown < 5 then
+							local oo = calcFunc({ }, true, FAST)
+							print(string.format("[DIAG] cand id=%s type=%s name=%s -> FullDPS=%s CombinedDPS=%s TotalDPS=%s",
+								tostring(node.id), tostring(node.type), tostring(node.dn),
+								tostring(oo.FullDPS), tostring(oo.CombinedDPS), tostring(oo.TotalDPS)))
+							shown = shown + 1
+						end
+						if spec.allocNodes[node.id] then spec:DeallocSingleNode(node) end
+					end
+				end
 				local rounds = 0
 				while spec:CountAllocNodes() < budget and rounds < 20 do
 					rounds = rounds + 1
