@@ -2750,12 +2750,31 @@ end
 
 function PassiveSpecClass:SwitchAttributeNode(nodeId, attributeIndex)
 	if self.tree.nodes[nodeId] then --Make sure node exists on current tree
+		-- Idempotence guard: already switched to this exact option => no-op.
+		-- Without it, EVERY re-allocation of an attribute node re-ran the
+		-- whole pipeline below: a deep copyTableSafe of the shared tree node,
+		-- ReplaceNode/ProcessStats attaching a brand-new mirror generation,
+		-- and BuildAllDependsAndPaths (hashOverrides projection) then grafts
+		-- that generation onto the shared node. The node's reachable graph
+		-- doubled per call, until one copyTableSafe memo crossed LuaJIT's
+		-- 2^26 hash-node limit ("table overflow", LJ_MAX_HBITS) -- tens of GB
+		-- and minutes per copy. The optimizer's restore/mutate/pin loops
+		-- re-allocate the same attribute nodes dozens of times and hit this
+		-- wall within minutes (macOS CI wedge + Linux shard-2 OOM). Callers
+		-- that genuinely change the option (UI, weapon set, import) pass a
+		-- different index and still re-switch; nil overrides (class change
+		-- wipe, unswitch, DeallocNode) re-switch too.
+		local existing = self.hashOverrides[nodeId]
+		if existing and existing._attrOptionIndex == attributeIndex then
+			return
+		end
 		local newNode = copyTableSafe(self.tree.nodes[nodeId], false, true)
 		if not newNode.isAttribute then return end -- safety check
 		
 		local option = newNode.options[attributeIndex]
 		self:ReplaceNode(newNode, option)
 		self.tree:ProcessStats(newNode)
+		newNode._attrOptionIndex = attributeIndex
 		
 		self.hashOverrides[nodeId] = newNode
 	end

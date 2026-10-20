@@ -1,3 +1,43 @@
+-- Runaway-copy tripwire (root cause of the historical "macOS JIT wedge" and
+-- the Linux shard-2 OOM deaths, diagnosed with sample/vmmap/probes):
+-- PassiveSpec:SwitchAttributeNode deep-copies a SHARED passive-tree node, and
+-- until the idempotence guard landed its per-call mirror generations doubled
+-- the node's reachable graph every round -- one copyTableSafe memo eventually
+-- crossed LuaJIT's hard 2^26 hash-node limit ("table overflow", LJ_MAX_HBITS)
+-- after ~30 GB of churn and 100+ s. Healthy copies in this suite peak at
+-- ~500 memo entries (probe census over 89-208 copies per run), so a 1M-entry
+-- outermost copy is a definite regression: fail fast, naming the caller,
+-- instead of letting the shard die silently minutes later.
+do
+	local MAX_MEMO = 1000000
+	if not _G.copyTableSafeTripwire then
+		local realCopy = _G.copyTableSafe
+		_G.copyTableSafe = function(tbl, noRecurse, preserveMeta, isSubTable, subTableMap)
+			if isSubTable or subTableMap then
+				-- inner recursion frame: untouched, memo is owned by the outermost call
+				return realCopy(tbl, noRecurse, preserveMeta, isSubTable, subTableMap)
+			end
+			local info = debug.getinfo(2, "nS") or { }
+			local who = (info.name or "?") .. "@" .. tostring(info.short_src) .. ":" .. tostring(info.currentline)
+			local count = 0
+			local memo = setmetatable({ }, {
+				__index = function(t, k) return rawget(t, k) end,
+				__newindex = function(t, k, v)
+					count = count + 1
+					if count > MAX_MEMO then
+						error(string.format(
+							"copyTableSafe runaway copy: >%d memoised sub-tables (caller %s) -- a shared table is accumulating generated copies",
+							MAX_MEMO, who), 0)
+					end
+					rawset(t, k, v)
+				end,
+			})
+			return realCopy(tbl, noRecurse, preserveMeta, nil, memo)
+		end
+		_G.copyTableSafeTripwire = true
+	end
+end
+
 describe("TestTreeOptimizer", function()
 	before_each(function()
 		newBuild()
