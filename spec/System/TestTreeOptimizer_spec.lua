@@ -1,15 +1,18 @@
 -- Runaway-copy tripwire (root cause of the historical "macOS JIT wedge" and
 -- the Linux shard-2 OOM deaths, diagnosed with sample/vmmap/probes):
 -- PassiveSpec:SwitchAttributeNode deep-copies a SHARED passive-tree node, and
--- until the idempotence guard landed its per-call mirror generations doubled
--- the node's reachable graph every round -- one copyTableSafe memo eventually
--- crossed LuaJIT's hard 2^26 hash-node limit ("table overflow", LJ_MAX_HBITS)
--- after ~30 GB of churn and 100+ s. Healthy copies in this suite peak at
--- ~500 memo entries (probe census over 89-208 copies per run), so a 1M-entry
--- outermost copy is a definite regression: fail fast, naming the caller,
--- instead of letting the shard die silently minutes later.
+-- until the idempotence guard + keep-overrides + per-tree generation cache
+-- landed, its per-call mirror generations doubled the node's reachable graph
+-- every round -- one copyTableSafe memo eventually crossed LuaJIT's hard
+-- 2^26 hash-node limit ("table overflow", LJ_MAX_HBITS) after ~30 GB of churn
+-- and 100+ s. With at most one mirror generation per (node, option) now
+-- possible, healthy copies peak at ~500 memo entries (probe census over
+-- 89-208 copies per run) and the absolute worst first-switch copy is
+-- ~#options x 60 tables; a 50k-entry outermost copy is therefore a definite
+-- regression: fail fast, naming the caller, instead of letting the shard die
+-- silently minutes later.
 do
-	local MAX_MEMO = 1000000
+	local MAX_MEMO = 50000
 	if not _G.copyTableSafeTripwire then
 		local realCopy = _G.copyTableSafe
 		_G.copyTableSafe = function(tbl, noRecurse, preserveMeta, isSubTable, subTableMap)
