@@ -656,6 +656,24 @@ describe("TestTreeOptimizer", function()
 						"greedy control committed nothing (rounds=%s) -- frontier frozen, not a scoring issue",
 						tostring(rounds)), 0)
 				end
+				-- [DIAG2-TEMP] ground truth: does the retained tree move DPS?
+				do
+					local kept = 0
+					local sample = { }
+					for id in pairs(spec.allocNodes) do
+						kept = kept + 1
+						if #sample < 8 then
+							sample[#sample + 1] = string.format("%s:%s", tostring(id), tostring((spec.nodes[id] or {}).dn))
+						end
+					end
+					local cold = Calcs.getMiscCalculator(build)
+					local oCold = cold({ }, true)
+					local warm = build.calcsTab:GetMiscCalculator()
+					local oWarm = warm({ }, true)
+					print(string.format("[DIAG2] kept=%s baseCold=%s coldNow=%s warmNow=%s sample=%s",
+						tostring(kept), tostring(baseOutput.CombinedDPS), tostring(oCold.CombinedDPS),
+						tostring(oWarm.CombinedDPS), table.concat(sample, ",")))
+				end
 				runCallback("OnFrame")
 				local greedyDPS = realDPS()
 				if not (greedyDPS > startDPS) then
