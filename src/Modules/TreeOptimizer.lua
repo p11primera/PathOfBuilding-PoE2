@@ -303,13 +303,34 @@ function optimizer.mutateAdd(spec, pinnedNodes)
 	return spec.allocNodes[node.id] ~= nil
 end
 
+-- SA-internal twin of PassiveSpec:DeallocNode WITHOUT the attribute-override
+-- reset. Upstream DeallocNode nils hashOverrides for every deallocated
+-- dependant ("reset switched attribute nodes" -- correct for the UI: a
+-- detached attribute node re-switches to the current spec.attributeIndex on
+-- next allocation). In the SA loop that is fatal: mutateRemove/trimToBudget
+-- ↔ restoreAlloc alternate hundreds of times, every clear forces a fresh
+-- SwitchAttributeNode generation on re-allocation, each generation gets
+-- grafted onto the SHARED tree node by the BuildAllDependsAndPaths override
+-- projection, and the node's reachable graph doubles per round until one
+-- copyTableSafe memo hits LuaJIT's 2^26 hash-node limit (the historical
+-- macOS "JIT wedge" / Linux shard-2 OOM). Keeping the override lets
+-- SwitchAttributeNode's idempotence guard hit, so re-allocation is a no-op.
+-- Overrides on DEALLOCATED nodes contribute nothing to calcs (node mods are
+-- applied only for allocated nodes), so search semantics are unchanged.
+local function deallocNodeKeepOverrides(spec, node)
+	for _, depNode in ipairs(node.depends) do
+		spec:DeallocSingleNode(depNode)
+	end
+	spec:BuildAllDependsAndPaths()
+end
+
 -- Mutation: Remove a random leaf node.
 -- Returns true only if the tree actually changed.
 function optimizer.mutateRemove(spec, pinnedNodes)
 	local leaves = optimizer.getLeafNodes(spec, pinnedNodes)
 	if #leaves == 0 then return false end
 	local node = leaves[m_random(#leaves)]
-	spec:DeallocNode(node)
+	deallocNodeKeepOverrides(spec, node)
 	return spec.allocNodes[node.id] == nil
 end
 
@@ -377,7 +398,7 @@ local function trimToBudget(spec, pinnedNodes, budget)
 		if #pool == 0 then break end
 		local before = countUsedPoints(spec)
 		local leaf = pool[m_random(#pool)]
-		spec:DeallocNode(leaf)
+		deallocNodeKeepOverrides(spec, leaf)
 		if countUsedPoints(spec) == before then
 			skip[leaf.id] = true
 		end
