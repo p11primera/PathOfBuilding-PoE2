@@ -443,6 +443,68 @@ describe("TestTreeOptimizer", function()
 				end
 			end
 		end)
+
+		-- Mastery-selection hygiene: the optimizer deliberately does NOT
+		-- purge stale selections (upstream owns that invariant:
+		-- DeallocSingleNode nils the selection for deallocated Mastery
+		-- nodes, and BuildAllDependsAndPaths sweeps ALL nodes, clearing
+		-- selections on unallocated/unknown masteries -- PassiveSpec.lua
+		-- ~1798-1828). A hand-rolled purge iterating
+		-- pairs(masterySelections) while nilling keys was a mid-iteration
+		-- mutation UB hazard and broke earlier tests for zero benefit.
+		-- These tests pin the upstream invariant so a future upstream
+		-- refactor fails HERE, not in the optimizer at runtime.
+		it("stale mastery selection on an unallocated node is swept", function()
+			local spec = build.spec
+			-- any Mastery node + any recognized effect id
+			local masteryNode
+			for _, node in pairs(spec.nodes) do
+				if node.type == "Mastery" and not node.alloc and not masteryNode then
+					masteryNode = node
+				end
+			end
+			local effectId
+			for id in pairs(spec.tree.masteryEffects) do
+				effectId = id
+				break
+			end
+			if masteryNode and effectId then
+				assert.is_nil(spec.allocNodes[masteryNode.id])
+				spec.masterySelections[masteryNode.id] = effectId
+				spec:BuildAllDependsAndPaths()
+				if spec.masterySelections[masteryNode.id] ~= nil then
+					error(string.format(
+						"stale mastery selection survived BuildAllDependsAndPaths: node=%s effect=%s",
+						tostring(masteryNode.id), tostring(effectId)), 0)
+				end
+			end
+		end)
+
+		it("runSA leaves no selection on unallocated mastery nodes", function()
+			local optimizer = build.calcsTab.calcs.optimizer
+			local spec = build.spec
+			local ok = pcall(function()
+				optimizer.runSA(build, {
+					alpha = 0.5,
+					maxIterations = 25,
+					pointBudget = 12,
+					pinnedNodes = {},
+					seed = 4242,
+				})
+			end)
+			if not ok then
+				error("runSA failed before mastery sweep check", 0)
+			end
+			for _, node in pairs(spec.nodes) do
+				if node.type == "Mastery" and spec.masterySelections[node.id]
+					and not spec.allocNodes[node.id] then
+					error(string.format(
+						"runSA left selection %s on unallocated mastery node %s",
+						tostring(spec.masterySelections[node.id]),
+						tostring(node.id)), 0)
+				end
+			end
+		end)
 	end)
 
 	describe("coroutine runner", function()
