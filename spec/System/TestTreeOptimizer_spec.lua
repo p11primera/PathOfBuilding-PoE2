@@ -573,6 +573,99 @@ describe("TestTreeOptimizer", function()
 			assert.is_true(realDPS_after >= realDPS_before)
 		end)
 
+			-- Real-world validation on an actual skill build (the "does it actually
+			-- work" check): a Fireball caster gets real offensive DPS, passive
+			-- points are the only variable, and there is genuine headroom -- so the
+			-- gate is STRICT improvement, not the no-regression >= above. The same
+			-- build also drives a deterministic greedy hill-climber built from the
+			-- optimizer's own primitives (getReachableNodes/AllocNode/calcScore):
+			-- greedy improving proves headroom exists, and SA's own strict
+			-- improvement proves the stochastic search converts it. Both use the
+			-- identical cold calcFunc closure + fast options the SA loop uses, so
+			-- scores are directly comparable.
+			it("strictly improves DPS on a realistic fireball build (SA + greedy control)", function()
+			newBuild()
+			build.skillsTab:PasteSocketGroup("Fireball 1/0  1")
+			runCallback("OnFrame")
+			local spec = build.spec
+			local optimizer = build.calcsTab.calcs.optimizer
+
+			local Calcs = require("Modules.Calcs")
+			local FAST = { requirementsItems = true, requirementsGems = true, skills = true }
+			local function scoreOf(calcFunc, baseOutput)
+				return (optimizer.calcScore(calcFunc({ }, true, FAST), baseOutput, 1.0))
+			end
+			local function realDPS()
+				local calcFunc = build.calcsTab:GetMiscCalculator()
+				local output = calcFunc({ }, true)
+				return (output.FullDPS and output.FullDPS > 0 and output.FullDPS) or output.CombinedDPS or 0
+			end
+
+			local startDPS = realDPS()
+			if not (startDPS > 0) then
+				error(string.format("fireball build produced no DPS to optimize (startDPS=%s)",
+					tostring(startDPS)), 0)
+			end
+
+			-- Deterministic greedy control: repeatedly commit the best-scoring
+			-- reachable node (id order for determinism) until nothing improves.
+			local budget = 40
+			do
+				local calcFunc = Calcs.getMiscCalculator(build)
+				local baseOutput = calcFunc({ }, true, FAST)
+				local rounds = 0
+				while spec:CountAllocNodes() < budget and rounds < 20 do
+					rounds = rounds + 1
+					local bestNode, bestScore
+					for _, node in ipairs(optimizer.getReachableNodes(spec)) do
+						spec:AllocNode(node)
+						local s = scoreOf(calcFunc, baseOutput)
+						if spec.allocNodes[node.id] then
+							if not bestScore or s > bestScore then
+								bestScore, bestNode = s, node
+							end
+							spec:DeallocSingleNode(node)
+						end
+					end
+					if not bestNode then break end
+					local currentScore = scoreOf(calcFunc, baseOutput)
+					if not (bestScore > currentScore) then break end
+					spec:AllocNode(bestNode)
+				end
+				runCallback("OnFrame")
+				local greedyDPS = realDPS()
+				if not (greedyDPS > startDPS) then
+					error(string.format(
+						"greedy control found no headroom (start=%s greedy=%s) -- build too weak or scoring broken",
+						tostring(startDPS), tostring(greedyDPS)), 0)
+				end
+			end
+
+			-- Fresh tree, then the real thing: SA must strictly improve DPS.
+			newBuild()
+			build.skillsTab:PasteSocketGroup("Fireball 1/0  1")
+			runCallback("OnFrame")
+			local beforeDPS = realDPS()
+			local result = optimizer.runSA(build, {
+				alpha = 1.0,          -- pure offence: the objective IS DPS
+				maxIterations = 300,
+				pointBudget = 40,
+				pinnedNodes = {},
+				seed = 1337,
+			})
+			if not result then
+				error("runSA returned no result on fireball build", 0)
+			end
+			runCallback("OnFrame")
+			local afterDPS = realDPS()
+			if not (afterDPS > beforeDPS) then
+				error(string.format(
+					"optimizer did not strictly improve DPS: before=%s after=%s (bestScore=%s iters=%s)",
+					tostring(beforeDPS), tostring(afterDPS),
+					tostring(result.bestScore), tostring(result.iterations)), 0)
+			end
+		end)
+
 		it("undo restores original tree", function()
 			newBuild()
 			local spec = build.spec
