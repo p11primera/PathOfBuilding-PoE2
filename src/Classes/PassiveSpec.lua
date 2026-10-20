@@ -2768,6 +2768,34 @@ function PassiveSpecClass:SwitchAttributeNode(nodeId, attributeIndex)
 		if existing and existing._attrOptionIndex == attributeIndex then
 			return
 		end
+		-- Generation cache on the shared tree object (main:LoadTree caches
+		-- one PassiveTree per version for the whole process): build the
+		-- mirror ONCE per (nodeId, option). When the override map is reset
+		-- underneath us -- newBuild()/ImportFromNodeList swap in a fresh
+		-- hashOverrides, UI unswitch nils entries, DeallocNode clears
+		-- dependants -- re-attaching the SAME mirror object keeps the
+		-- shared node at one generation per option. Without this, every
+		-- test's fresh spec re-switched the same attribute nodes on the
+		-- shared tree, and each new mirror referenced the still-grafted
+		-- previous one: reachable-graph x2 per switch until a
+		-- copyTableSafe memo crossed LuaJIT's 2^26 limit. ReplaceNode and
+		-- ProcessStats only ever rewrite the shared node FROM these
+		-- overrides (idempotent re-projection), so reuse is safe.
+		local cache = self.tree._attrSwitchCache
+		if not cache then
+			cache = { }
+			self.tree._attrSwitchCache = cache
+		end
+		local byIndex = cache[nodeId]
+		if not byIndex then
+			byIndex = { }
+			cache[nodeId] = byIndex
+		end
+		local cached = byIndex[attributeIndex]
+		if cached then
+			self.hashOverrides[nodeId] = cached
+			return
+		end
 		local newNode = copyTableSafe(self.tree.nodes[nodeId], false, true)
 		if not newNode.isAttribute then return end -- safety check
 		
@@ -2776,6 +2804,7 @@ function PassiveSpecClass:SwitchAttributeNode(nodeId, attributeIndex)
 		self.tree:ProcessStats(newNode)
 		newNode._attrOptionIndex = attributeIndex
 		
+		byIndex[attributeIndex] = newNode
 		self.hashOverrides[nodeId] = newNode
 	end
 end
