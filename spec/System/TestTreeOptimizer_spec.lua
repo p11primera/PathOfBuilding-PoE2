@@ -596,7 +596,14 @@ describe("TestTreeOptimizer", function()
 				return (optimizer.calcScore(calcFunc({ }, true, FAST), baseOutput, 1.0))
 			end
 			local function realDPS()
-				local calcFunc = build.calcsTab:GetMiscCalculator()
+				-- MUST use the cold module closure (rebuilds from current tree
+				-- state), NOT build.calcsTab:GetMiscCalculator() -- that returns
+				-- CalcsTab.miscCalculator[1], a cached closure refreshed only by
+				-- a full CalcsTab recalc. Direct AllocNode/dealloc (greedy, and
+				-- SA's own mutations) never invalidates it, so it reports a
+				-- frozen baseline (the earlier probe returned 4.4584 even at
+				-- allocCount=0) -> start == greedy == after bit-for-bit.
+				local calcFunc = Calcs.getMiscCalculator(build)
 				local output = calcFunc({ }, true)
 				return (output.FullDPS and output.FullDPS > 0 and output.FullDPS) or output.CombinedDPS or 0
 			end
