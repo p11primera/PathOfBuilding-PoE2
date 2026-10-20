@@ -609,39 +609,28 @@ describe("TestTreeOptimizer", function()
 
 			-- Deterministic greedy control: repeatedly commit the best-scoring
 			-- reachable node (id order for determinism) until nothing improves.
+			-- MUST rebuild depends/paths each round: getReachableNodes filters on
+			-- pathDist == 1, and pathDist is only recomputed by
+			-- BuildAllDependsAndPaths. Without a rebuild the frontier freezes
+			-- after the first commit (newly-adjacent nodes keep a stale pathDist)
+			-- and the hill-climb stalls at the isolated start -- this is exactly
+			-- what runSA gets for free via initSAState -> ensurePinnedAllocated.
 			local budget = 40
 			do
 				local calcFunc = Calcs.getMiscCalculator(build)
+				spec:BuildAllDependsAndPaths()
 				local baseOutput = calcFunc({ }, true, FAST)
-				-- [DIAG-TEMP] one-shot ground truth for the CI failure
-				do
-					local o = calcFunc({ }, true, FAST)
+				local rounds = 0
+				local committed = 0
+				while spec:CountAllocNodes() < budget and rounds < 25 do
+					rounds = rounds + 1
 					local cand = optimizer.getReachableNodes(spec)
-					local gDPS = (o.FullDPS and o.FullDPS > 0 and o.FullDPS) or o.CombinedDPS or 0
-					print(string.format("[DIAG] reachable=%d allocCount=%s FullDPS=%s CombinedDPS=%s TotalDPS=%s getDPS=%s",
-						#cand, tostring(spec:CountAllocNodes()),
-						tostring(o.FullDPS), tostring(o.CombinedDPS), tostring(o.TotalDPS), tostring(gDPS)))
-					local shown = 0
+					if #cand == 0 then break end
+					local bestNode, bestScore
 					for _, node in ipairs(cand) do
 						spec:AllocNode(node)
-						if spec.allocNodes[node.id] and shown < 5 then
-							local oo = calcFunc({ }, true, FAST)
-							print(string.format("[DIAG] cand id=%s type=%s name=%s -> FullDPS=%s CombinedDPS=%s TotalDPS=%s",
-								tostring(node.id), tostring(node.type), tostring(node.dn),
-								tostring(oo.FullDPS), tostring(oo.CombinedDPS), tostring(oo.TotalDPS)))
-							shown = shown + 1
-						end
-						if spec.allocNodes[node.id] then spec:DeallocSingleNode(node) end
-					end
-				end
-				local rounds = 0
-				while spec:CountAllocNodes() < budget and rounds < 20 do
-					rounds = rounds + 1
-					local bestNode, bestScore
-					for _, node in ipairs(optimizer.getReachableNodes(spec)) do
-						spec:AllocNode(node)
-						local s = scoreOf(calcFunc, baseOutput)
 						if spec.allocNodes[node.id] then
+							local s = scoreOf(calcFunc, baseOutput)
 							if not bestScore or s > bestScore then
 								bestScore, bestNode = s, node
 							end
@@ -652,13 +641,20 @@ describe("TestTreeOptimizer", function()
 					local currentScore = scoreOf(calcFunc, baseOutput)
 					if not (bestScore > currentScore) then break end
 					spec:AllocNode(bestNode)
+					committed = committed + 1
+					spec:BuildAllDependsAndPaths()
+				end
+				if committed == 0 then
+					error(string.format(
+						"greedy control committed nothing (rounds=%s) -- frontier frozen, not a scoring issue",
+						tostring(rounds)), 0)
 				end
 				runCallback("OnFrame")
 				local greedyDPS = realDPS()
 				if not (greedyDPS > startDPS) then
 					error(string.format(
-						"greedy control found no headroom (start=%s greedy=%s) -- build too weak or scoring broken",
-						tostring(startDPS), tostring(greedyDPS)), 0)
+						"greedy control committed %s nodes but DPS did not rise (start=%s greedy=%s)",
+						tostring(committed), tostring(startDPS), tostring(greedyDPS)), 0)
 				end
 			end
 
