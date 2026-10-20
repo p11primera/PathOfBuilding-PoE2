@@ -596,13 +596,12 @@ describe("TestTreeOptimizer", function()
 				return (optimizer.calcScore(calcFunc({ }, true, FAST), baseOutput, 1.0))
 			end
 			local function realDPS()
-				-- MUST use the cold module closure (rebuilds from current tree
-				-- state), NOT build.calcsTab:GetMiscCalculator() -- that returns
-				-- CalcsTab.miscCalculator[1], a cached closure refreshed only by
-				-- a full CalcsTab recalc. Direct AllocNode/dealloc (greedy, and
-				-- SA's own mutations) never invalidates it, so it reports a
-				-- frozen baseline (the earlier probe returned 4.4584 even at
-				-- allocCount=0) -> start == greedy == after bit-for-bit.
+				-- Cold module closure (same one the SA loop scores against),
+				-- matching the determinism rule. NOTE: DIAG2 confirmed warm
+				-- (build.calcsTab:GetMiscCalculator) and cold AGREE here and
+				-- both read live tree state -- the earlier start==greedy bug
+				-- was a tree-retention bug in the greedy control (stale
+				-- depends after probe-dealloc), NOT a stale-closure issue.
 				local calcFunc = Calcs.getMiscCalculator(build)
 				local output = calcFunc({ }, true)
 				return (output.FullDPS and output.FullDPS > 0 and output.FullDPS) or output.CombinedDPS or 0
@@ -614,25 +613,36 @@ describe("TestTreeOptimizer", function()
 					tostring(startDPS)), 0)
 			end
 
-			-- Deterministic greedy control: repeatedly commit the best-scoring
-			-- reachable node (id order for determinism) until nothing improves.
-			-- MUST rebuild depends/paths each round: getReachableNodes filters on
-			-- pathDist == 1, and pathDist is only recomputed by
-			-- BuildAllDependsAndPaths. Without a rebuild the frontier freezes
-			-- after the first commit (newly-adjacent nodes keep a stale pathDist)
-			-- and the hill-climb stalls at the isolated start -- this is exactly
-			-- what runSA gets for free via initSAState -> ensurePinnedAllocated.
+			-- Deterministic greedy control mirroring SA's OWN mutation pattern
+			-- (saStep: prev=snapshotAlloc -> mutate once -> restoreAlloc on reject,
+			-- commit on accept). Two reasons this must match SA and not hand-roll
+			-- probe/dealloc:
+			--   (1) getReachableNodes only filters ClassStart/AscendClassStart/
+			--       Mastery, so a candidate can be an ascendancy-start or a
+			--       multiple-choice node; probe-DeallocSingleNode of such a node
+			--       leaves node.depends STALE (BuildAllDependsAndPaths wipes and
+			--       rebuilds depends; DeallocSingleNode does not), so the
+			--       subsequent commit AllocNode silently fails to retain and the
+			--       hill-climb spins re-adding the same first candidate. SA never
+			--       hits this because restoreAlloc rebuilds depends on rollback.
+			--   (2) committed MUST be verified (allocNodes[id] non-nil after the
+			--       keep + rebuild), never counted on a blind AllocNode.
+			-- Termination is budget-only (rebuild every accept grows the frontier,
+			-- so rounds never stall) with a high safety cap.
 			local budget = 40
 			do
 				local calcFunc = Calcs.getMiscCalculator(build)
 				spec:BuildAllDependsAndPaths()
 				local baseOutput = calcFunc({ }, true, FAST)
-				local rounds = 0
-				local committed = 0
-				while spec:CountAllocNodes() < budget and rounds < 25 do
-					rounds = rounds + 1
+				local kept = 0
+				local guard = 0
+				while spec:CountAllocNodes() < budget and guard < 500 do
+					guard = guard + 1
+					local prev = optimizer.snapshotAlloc(spec)
 					local cand = optimizer.getReachableNodes(spec)
 					if #cand == 0 then break end
+					-- score current tree, then each candidate (rollback each)
+					local currentScore = scoreOf(calcFunc, baseOutput)
 					local bestNode, bestScore
 					for _, node in ipairs(cand) do
 						spec:AllocNode(node)
@@ -641,45 +651,33 @@ describe("TestTreeOptimizer", function()
 							if not bestScore or s > bestScore then
 								bestScore, bestNode = s, node
 							end
-							spec:DeallocSingleNode(node)
 						end
+						optimizer.restoreAlloc(spec, prev)
 					end
-					if not bestNode then break end
-					local currentScore = scoreOf(calcFunc, baseOutput)
-					if not (bestScore > currentScore) then break end
-					spec:AllocNode(bestNode)
-					committed = committed + 1
-					spec:BuildAllDependsAndPaths()
+					if bestNode and bestScore > currentScore then
+						optimizer.restoreAlloc(spec, prev)   -- clean base
+						spec:AllocNode(bestNode)              -- keep best
+						spec:BuildAllDependsAndPaths()         -- rebuild depends
+						if spec.allocNodes[bestNode.id] then   -- VERIFY retention
+							kept = kept + 1
+						else
+							break                              -- can't retain: stop
+						end
+					else
+						optimizer.restoreAlloc(spec, prev)
+						break
+					end
 				end
-				if committed == 0 then
+				if kept == 0 then
 					error(string.format(
-						"greedy control committed nothing (rounds=%s) -- frontier frozen, not a scoring issue",
-						tostring(rounds)), 0)
+						"greedy control retained nothing (guard=%s) -- frontier/retention broken",
+						tostring(guard)), 0)
 				end
-				-- [DIAG2-TEMP] ground truth: does the retained tree move DPS?
-				do
-					local kept = 0
-					local sample = { }
-					for id in pairs(spec.allocNodes) do
-						kept = kept + 1
-						if #sample < 8 then
-							sample[#sample + 1] = string.format("%s:%s", tostring(id), tostring((spec.nodes[id] or {}).dn))
-						end
-					end
-					local cold = Calcs.getMiscCalculator(build)
-					local oCold = cold({ }, true)
-					local warm = build.calcsTab:GetMiscCalculator()
-					local oWarm = warm({ }, true)
-					print(string.format("[DIAG2] kept=%s baseCold=%s coldNow=%s warmNow=%s sample=%s",
-						tostring(kept), tostring(baseOutput.CombinedDPS), tostring(oCold.CombinedDPS),
-						tostring(oWarm.CombinedDPS), table.concat(sample, ",")))
-				end
-				runCallback("OnFrame")
 				local greedyDPS = realDPS()
 				if not (greedyDPS > startDPS) then
 					error(string.format(
-						"greedy control committed %s nodes but DPS did not rise (start=%s greedy=%s)",
-						tostring(committed), tostring(startDPS), tostring(greedyDPS)), 0)
+						"greedy control kept %s nodes but DPS did not rise (start=%s greedy=%s)",
+						tostring(kept), tostring(startDPS), tostring(greedyDPS)), 0)
 				end
 			end
 
